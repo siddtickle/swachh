@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Generated at build time by scripts/copy-ffmpeg.js — not committed
+vendor/
+
+# Build output
+dist/
+out/
+
+# macOS
+.DS_Store
+*.DS_Store
+**/.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/
+
+# The API key and config are stored in ~/Library/Application Support/swachh/
+# (outside this repo entirely), so they can never be committed.
+# But .organizer/ folders live inside project folders — also outside this repo.

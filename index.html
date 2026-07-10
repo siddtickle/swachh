@@ -1,0 +1,2174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>swachh</title>
+<style>
+/* ── Reset & Variables ─────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:         #0f0f0f;
+  --surf:       #191919;
+  --surf2:      #222;
+  --surf3:      #2a2a2a;
+  --border:     #2d2d2d;
+  --border2:    #3a3a3a;
+  --text:       #f0f0f0;
+  --text2:      #aaa;
+  --text3:      #666;
+  --accent:     #4a9eff;
+  --accent-dim: rgba(74,158,255,0.15);
+  --red:        #ff5252;
+  --red-dim:    rgba(255,82,82,0.12);
+  --green:      #4caf50;
+  --orange:     #ff9800;
+  --purple:     #9c6fff;
+  --cam-iphone:  #4a9eff;
+  --cam-fuji:    #ff9800;
+  --cam-sony:    #9c6fff;
+  --cam-unknown: #888;
+  --radius:     6px;
+  --radius-lg:  10px;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  font-size: 13px;
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+button { cursor: pointer; border: none; font-family: inherit; font-size: inherit; }
+input, textarea { font-family: inherit; font-size: inherit; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #555; }
+
+/* ── Layout ────────────────────────────────────────────────────────────────── */
+#root { display: flex; flex-direction: column; height: 100vh; }
+
+/* ── Title bar (macOS traffic lights live here) ────────────────────────────── */
+#titlebar {
+  height: 52px;
+  -webkit-app-region: drag;
+  background: var(--surf);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px 0 80px;
+  gap: 10px;
+  flex-shrink: 0;
+}
+#titlebar * { -webkit-app-region: no-drag; }
+.title-logo { font-size: 14px; font-weight: 700; color: var(--text); letter-spacing: -0.3px; }
+.title-folder { font-size: 11px; color: var(--text3); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title-spacer { flex: 1; }
+.btn-icon {
+  width: 30px; height: 30px; border-radius: var(--radius);
+  background: transparent; color: var(--text2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; transition: background .15s, color .15s;
+}
+.btn-icon:hover { background: var(--surf3); color: var(--text); }
+.btn-icon.active { background: var(--accent-dim); color: var(--accent); }
+
+/* ── Toolbar ───────────────────────────────────────────────────────────────── */
+#toolbar {
+  height: 44px;
+  background: var(--surf);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; padding: 0 14px;
+  flex-shrink: 0;
+}
+.search-wrap {
+  position: relative; flex: 1; max-width: 320px;
+}
+.search-wrap .icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--text3); pointer-events: none; }
+#search-input {
+  width: 100%; padding: 5px 10px 5px 30px; border-radius: var(--radius);
+  background: var(--surf2); border: 1px solid var(--border); color: var(--text);
+  outline: none; transition: border-color .15s;
+}
+#search-input:focus { border-color: var(--accent); }
+#search-input::placeholder { color: var(--text3); }
+.toolbar-sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
+.seg-btn {
+  padding: 4px 10px; border-radius: var(--radius); color: var(--text2);
+  background: transparent; font-size: 12px; transition: all .15s;
+}
+.seg-btn:hover { background: var(--surf2); color: var(--text); }
+.seg-btn.active { background: var(--surf3); color: var(--text); }
+.seg-label { font-size: 11px; color: var(--text3); margin-right: 2px; }
+select.toolbar-select {
+  padding: 4px 8px; border-radius: var(--radius); font-size: 12px;
+  background: var(--surf2); border: 1px solid var(--border); color: var(--text2);
+  outline: none; cursor: pointer;
+}
+select.toolbar-select:hover { border-color: var(--border2); color: var(--text); }
+.badge-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--red); color: white; border-radius: 10px;
+  min-width: 18px; height: 18px; font-size: 10px; font-weight: 700;
+  padding: 0 5px;
+}
+
+/* ── Content area ──────────────────────────────────────────────────────────── */
+#content { display: flex; flex: 1; overflow: hidden; }
+
+/* ── Filter sidebar ────────────────────────────────────────────────────────── */
+#sidebar {
+  width: 220px; flex-shrink: 0;
+  background: var(--surf);
+  border-right: 1px solid var(--border);
+  overflow-y: auto; padding: 12px 0;
+  transition: width .2s, opacity .2s;
+}
+#sidebar.hidden { width: 0; opacity: 0; pointer-events: none; overflow: hidden; }
+.sidebar-section { padding: 0 12px 12px; }
+.sidebar-section + .sidebar-section { border-top: 1px solid var(--border); padding-top: 12px; }
+.sidebar-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text3); margin-bottom: 8px; }
+.filter-opt {
+  display: flex; align-items: center; gap: 8px; padding: 5px 8px;
+  border-radius: var(--radius); cursor: pointer; transition: background .1s;
+}
+.filter-opt:hover { background: var(--surf2); }
+.filter-opt input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+.filter-opt label { cursor: pointer; color: var(--text2); flex: 1; font-size: 12px; }
+.filter-opt .count { color: var(--text3); font-size: 11px; }
+.cam-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.cam-iphone  { background: var(--cam-iphone); }
+.cam-fuji    { background: var(--cam-fuji); }
+.cam-sony    { background: var(--cam-sony); }
+.cam-unknown { background: var(--cam-unknown); }
+.sidebar-range { display: flex; flex-direction: column; gap: 4px; }
+.sidebar-range label { font-size: 11px; color: var(--text3); }
+.sidebar-range select {
+  padding: 4px 6px; border-radius: var(--radius); font-size: 12px;
+  background: var(--surf2); border: 1px solid var(--border); color: var(--text2);
+  outline: none; width: 100%;
+}
+
+/* ── Main grid area ────────────────────────────────────────────────────────── */
+#grid-area { flex: 1; overflow-y: auto; padding: 0; }
+.day-group { margin-bottom: 4px; }
+.day-header {
+  position: sticky; top: 0; z-index: 10;
+  background: rgba(15,15,15,0.92); backdrop-filter: blur(8px);
+  padding: 10px 16px 8px;
+  display: flex; align-items: baseline; gap: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.day-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.day-meta { font-size: 11px; color: var(--text3); }
+.clip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 4px; padding: 8px 12px 12px;
+}
+.subfolder-label {
+  grid-column: 1 / -1;
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text3);
+  padding: 6px 2px 2px;
+}
+
+/* ── Clip card ─────────────────────────────────────────────────────────────── */
+.clip-card {
+  position: relative; border-radius: var(--radius); overflow: hidden;
+  background: var(--surf2); cursor: pointer;
+  border: 2px solid transparent; transition: border-color .1s, transform .1s;
+}
+.clip-card:hover { border-color: var(--border2); }
+.clip-card.selected { border-color: var(--accent); }
+.clip-card.marked-delete { border-color: var(--red); }
+.clip-card.marked-delete .thumb-wrap { opacity: .45; }
+.clip-card.starred .star-badge { opacity: 1; }
+
+.thumb-wrap {
+  width: 100%; aspect-ratio: 16/9; overflow: hidden; position: relative;
+  background: #111;
+}
+.thumb-wrap img {
+  width: 100%; height: 100%; object-fit: cover;
+  display: block; transition: opacity .2s;
+}
+.thumb-wrap .no-thumb {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  font-size: 24px; color: var(--surf3);
+}
+.dur-badge {
+  position: absolute; bottom: 4px; left: 4px;
+  background: rgba(0,0,0,.72); color: #fff; font-size: 10px; font-weight: 700;
+  padding: 1px 5px; border-radius: 3px; letter-spacing: .02em;
+}
+.res-badge {
+  position: absolute; bottom: 4px; right: 4px;
+  background: rgba(0,0,0,.72); color: var(--text3); font-size: 9px;
+  padding: 1px 4px; border-radius: 3px;
+}
+.blank-badge {
+  position: absolute; top: 4px; left: 4px;
+  background: rgba(255,82,82,.85); color: white; font-size: 9px; font-weight: 700;
+  padding: 1px 5px; border-radius: 3px;
+}
+.delete-badge {
+  position: absolute; top: 0; right: 0;
+  background: var(--red); color: white;
+  width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; border-bottom-left-radius: var(--radius);
+}
+.star-badge {
+  position: absolute; top: 4px; right: 4px;
+  font-size: 12px; opacity: 0;
+  text-shadow: 0 1px 3px rgba(0,0,0,.8);
+}
+
+.clip-info {
+  padding: 6px 7px 5px;
+}
+.clip-filename {
+  font-size: 10px; font-weight: 600; color: var(--text2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-bottom: 3px;
+}
+.clip-meta-row {
+  display: flex; gap: 4px; align-items: center; flex-wrap: wrap;
+}
+.clip-chip {
+  font-size: 9px; padding: 1px 5px; border-radius: 10px;
+  font-weight: 700; letter-spacing: .02em;
+}
+.chip-iphone  { background: rgba(74,158,255,.15); color: var(--cam-iphone); }
+.chip-fuji    { background: rgba(255,152,0,.15);  color: var(--cam-fuji); }
+.chip-sony    { background: rgba(156,111,255,.15); color: var(--cam-sony); }
+.chip-unknown { background: rgba(136,136,136,.15); color: var(--cam-unknown); }
+.chip-focal   { background: rgba(255,255,255,.08); color: var(--text3); }
+.tag-chip {
+  font-size: 9px; padding: 1px 5px; border-radius: 10px;
+  background: rgba(76,175,80,.15); color: var(--green); font-weight: 600;
+  max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── Detail panel ──────────────────────────────────────────────────────────── */
+#detail-panel {
+  width: 0; flex-shrink: 0; overflow: hidden;
+  background: var(--surf);
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  transition: width .2s;
+}
+#detail-panel.open { width: 380px; }
+.detail-header {
+  padding: 12px 14px;
+  display: flex; align-items: center; gap: 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.detail-title { flex: 1; font-size: 12px; font-weight: 600; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Video player */
+.video-wrap {
+  background: #000; position: relative; flex-shrink: 0;
+}
+.video-wrap video {
+  display: block; width: 100%; max-height: 320px; object-fit: contain;
+}
+#lut-canvas {
+  display: none; max-width: 100%; max-height: 320px; margin: 0 auto;
+}
+.vc-lut-btn {
+  padding: 2px 7px; font-size: 11px; border-radius: var(--radius);
+  background: var(--surf3); border: 1px solid var(--border); color: var(--text3);
+  cursor: pointer; transition: color .15s, border-color .15s;
+}
+.vc-lut-btn:hover { color: var(--text); }
+.vc-lut-btn.active { color: var(--accent); border-color: var(--accent); }
+.settings-lut-row { display: flex; align-items: center; gap: 8px; }
+.settings-lut-name { flex: 1; font-size: 12px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#video-msg {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: #000; color: var(--text3); font-size: 12px; text-align: center;
+  padding: 12px; line-height: 1.7; z-index: 2; gap: 4px;
+}
+#video-msg strong { display: block; color: var(--text2); margin-bottom: 4px; font-size: 13px; }
+#video-msg img { border-radius: 4px; }
+.video-controls {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px;
+  background: rgba(0,0,0,.4);
+}
+.vc-btn {
+  background: transparent; color: var(--text2); font-size: 14px;
+  padding: 2px 4px; border-radius: var(--radius); transition: color .1s;
+}
+.vc-btn:hover { color: var(--text); }
+.vc-speed {
+  padding: 2px 5px; font-size: 11px; border-radius: var(--radius);
+  background: var(--surf3); border: 1px solid var(--border); color: var(--text2);
+  cursor: pointer; outline: none;
+}
+
+/* Detail scrollable content */
+.detail-scroll { flex: 1; overflow-y: auto; padding: 12px 14px; }
+.detail-section { margin-bottom: 14px; }
+.detail-section-title {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text3); margin-bottom: 8px;
+}
+.meta-grid {
+  display: grid; grid-template-columns: auto 1fr; gap: 4px 10px;
+}
+.meta-key { font-size: 11px; color: var(--text3); white-space: nowrap; }
+.meta-val { font-size: 11px; color: var(--text2); word-break: break-all; }
+.meta-val a { color: var(--accent); text-decoration: none; }
+.meta-val a:hover { text-decoration: underline; }
+
+/* Tags */
+.tags-wrap { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.tag-pill {
+  display: flex; align-items: center; gap: 3px;
+  padding: 3px 8px 3px 8px; border-radius: 12px;
+  background: rgba(76,175,80,.15); border: 1px solid rgba(76,175,80,.3);
+  color: var(--green); font-size: 11px; font-weight: 600;
+  cursor: pointer; transition: background .1s;
+}
+.tag-pill:hover { background: rgba(255,82,82,.15); border-color: rgba(255,82,82,.3); color: var(--red); }
+.tag-pill:hover .tag-x::before { content: '×'; }
+.tag-pill .tag-x::before { content: ''; }
+.preset-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.preset-tag {
+  padding: 3px 8px; border-radius: 12px;
+  background: var(--surf2); border: 1px solid var(--border); color: var(--text3);
+  font-size: 11px; cursor: pointer; transition: all .1s;
+}
+.preset-tag:hover { border-color: var(--green); color: var(--green); }
+.preset-tag.applied { background: rgba(76,175,80,.12); border-color: rgba(76,175,80,.3); color: var(--green); }
+.tag-input-wrap { display: flex; gap: 6px; margin-top: 6px; }
+.tag-input {
+  flex: 1; padding: 5px 8px; border-radius: var(--radius);
+  background: var(--surf2); border: 1px solid var(--border); color: var(--text);
+  outline: none;
+}
+.tag-input:focus { border-color: var(--accent); }
+.tag-input::placeholder { color: var(--text3); }
+.btn-add-tag {
+  padding: 5px 10px; border-radius: var(--radius);
+  background: var(--accent-dim); border: 1px solid rgba(74,158,255,.3); color: var(--accent);
+  font-size: 12px; font-weight: 600; transition: all .1s;
+}
+.btn-add-tag:hover { background: var(--accent); color: white; }
+
+/* Notes */
+.notes-area {
+  width: 100%; min-height: 70px; padding: 7px 9px; border-radius: var(--radius);
+  background: var(--surf2); border: 1px solid var(--border); color: var(--text);
+  resize: vertical; outline: none; line-height: 1.5;
+}
+.notes-area:focus { border-color: var(--accent); }
+.notes-area::placeholder { color: var(--text3); }
+
+/* Detail actions */
+.detail-actions { display: flex; flex-direction: column; gap: 6px; }
+.btn-action {
+  padding: 7px 12px; border-radius: var(--radius); font-size: 12px; font-weight: 600;
+  display: flex; align-items: center; gap: 7px; transition: all .15s;
+}
+.btn-finder { background: var(--surf2); border: 1px solid var(--border); color: var(--text2); }
+.btn-finder:hover { border-color: var(--border2); color: var(--text); }
+.btn-star { background: var(--surf2); border: 1px solid var(--border); color: var(--text2); }
+.btn-star:hover { border-color: rgba(255,200,50,.4); color: #ffc832; }
+.btn-star.starred { background: rgba(255,200,50,.1); border-color: rgba(255,200,50,.4); color: #ffc832; }
+.btn-delete { background: var(--red-dim); border: 1px solid rgba(255,82,82,.3); color: var(--red); }
+.btn-delete:hover { background: rgba(255,82,82,.2); }
+.btn-delete.marked { background: rgba(255,82,82,.25); border-color: var(--red); }
+
+/* ── Trash review modal ────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,.72); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-overlay.hidden { display: none; }
+.modal {
+  background: var(--surf); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 24px;
+  width: 480px; max-height: 70vh; display: flex; flex-direction: column;
+  gap: 16px;
+}
+.modal h2 { font-size: 16px; font-weight: 700; }
+.modal-desc { font-size: 12px; color: var(--text2); line-height: 1.5; }
+.modal-list { flex: 1; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.modal-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.modal-item:last-child { border-bottom: none; }
+.modal-item-name { flex: 1; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal-item-dur { color: var(--text3); font-size: 11px; flex-shrink: 0; }
+.modal-item-rm {
+  color: var(--text3); font-size: 14px; cursor: pointer;
+  width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; transition: all .1s;
+}
+.modal-item-rm:hover { background: var(--red-dim); color: var(--red); }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.btn-cancel {
+  padding: 7px 16px; border-radius: var(--radius);
+  background: var(--surf2); border: 1px solid var(--border); color: var(--text2);
+  font-size: 13px;
+}
+.btn-cancel:hover { color: var(--text); }
+.btn-confirm-delete {
+  padding: 7px 16px; border-radius: var(--radius);
+  background: var(--red); color: white; font-size: 13px; font-weight: 700;
+}
+.btn-confirm-delete:hover { background: #e04040; }
+.btn-confirm-delete:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ── Setup / Loading screens ───────────────────────────────────────────────── */
+#setup-screen, #loading-screen {
+  position: fixed; inset: 0; z-index: 200;
+  background: var(--bg); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 20px;
+  -webkit-app-region: drag;
+}
+#setup-screen *, #loading-screen * { -webkit-app-region: no-drag; }
+.setup-icon { font-size: 56px; margin-bottom: 4px; }
+.setup-title { font-size: 22px; font-weight: 700; color: var(--text); }
+.setup-subtitle { font-size: 13px; color: var(--text3); text-align: center; max-width: 380px; line-height: 1.5; }
+.setup-warning {
+  background: rgba(255,152,0,.1); border: 1px solid rgba(255,152,0,.3);
+  border-radius: var(--radius-lg); padding: 14px 18px; max-width: 440px;
+}
+.setup-warning-title { font-size: 13px; font-weight: 700; color: var(--orange); margin-bottom: 6px; }
+.setup-warning-body { font-size: 12px; color: var(--text2); line-height: 1.6; }
+.setup-warning-body code {
+  background: var(--surf2); padding: 1px 5px; border-radius: 4px; font-family: monospace;
+  color: var(--text);
+}
+.btn-primary {
+  padding: 10px 28px; border-radius: var(--radius-lg);
+  background: var(--accent); color: white; font-size: 14px; font-weight: 700;
+  transition: opacity .15s;
+}
+.btn-primary:hover { opacity: .88; }
+.btn-secondary {
+  padding: 9px 20px; border-radius: var(--radius-lg);
+  background: var(--surf2); border: 1px solid var(--border); color: var(--text2);
+  font-size: 13px; transition: all .15s;
+}
+.btn-secondary:hover { border-color: var(--border2); color: var(--text); }
+
+/* Progress bar */
+.progress-wrap { width: 360px; }
+.progress-label { font-size: 12px; color: var(--text3); margin-bottom: 8px; }
+.progress-bar-track {
+  height: 4px; background: var(--surf2); border-radius: 2px; overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%; background: var(--accent); border-radius: 2px;
+  transition: width .3s; width: 0%;
+}
+.progress-current { font-size: 11px; color: var(--text3); margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-detail { font-size: 12px; color: var(--text2); }
+
+/* ── Empty state ───────────────────────────────────────────────────────────── */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100%; gap: 10px;
+}
+.empty-state-icon { font-size: 40px; opacity: .3; }
+.empty-state-text { font-size: 13px; color: var(--text3); }
+
+/* ── Toasts ────────────────────────────────────────────────────────────────── */
+#toast-container {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 8px; z-index: 300;
+  pointer-events: none;
+}
+.toast {
+  padding: 10px 16px; border-radius: var(--radius-lg);
+  background: var(--surf3); border: 1px solid var(--border2);
+  color: var(--text); font-size: 13px; font-weight: 500;
+  animation: toastIn .2s ease; pointer-events: none;
+  max-width: 320px; text-align: center;
+}
+@keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ── Kbd shortcut hint ─────────────────────────────────────────────────────── */
+kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 1px 5px; border-radius: 4px;
+  background: var(--surf3); border: 1px solid var(--border2);
+  color: var(--text3); font-size: 10px; font-family: inherit;
+}
+
+/* ── Analysis UI ───────────────────────────────────────────────────────────── */
+.analysis-box {
+  background: var(--surf2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 12px;
+  font-size: 12px; line-height: 1.5;
+}
+.analysis-desc { color: var(--text); margin-bottom: 8px; }
+.analysis-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.analysis-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: 600;
+  background: rgba(156,111,255,.12); color: var(--purple); border: 1px solid rgba(156,111,255,.25);
+}
+.analysis-empty {
+  color: var(--text3); font-size: 12px; line-height: 1.5;
+  padding: 6px 0;
+}
+.btn-analyze {
+  padding: 6px 12px; border-radius: var(--radius);
+  background: rgba(156,111,255,.12); border: 1px solid rgba(156,111,255,.3); color: var(--purple);
+  font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;
+  transition: all .15s; cursor: pointer;
+}
+.btn-analyze:hover  { background: rgba(156,111,255,.22); }
+.btn-analyze.loading { opacity: .6; cursor: wait; }
+.analysis-timestamp { font-size: 10px; color: var(--text3); margin-top: 6px; }
+
+/* ── Settings modal ────────────────────────────────────────────────────────── */
+.settings-modal {
+  background: var(--surf); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 24px;
+  width: 420px; display: flex; flex-direction: column; gap: 16px;
+}
+.settings-field label { display: block; font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+.settings-field input {
+  width: 100%; padding: 8px 10px; border-radius: var(--radius);
+  background: var(--surf2); border: 1px solid var(--border); color: var(--text);
+  outline: none; font-family: monospace; font-size: 12px;
+}
+.settings-field input:focus { border-color: var(--accent); }
+.settings-hint { font-size: 11px; color: var(--text3); line-height: 1.5; }
+.settings-hint a { color: var(--accent); text-decoration: none; }
+
+/* ── Analysis batch progress overlay ──────────────────────────────────────── */
+#analysis-overlay {
+  position: fixed; inset: 0; z-index: 150;
+  background: rgba(0,0,0,.8); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center;
+}
+#analysis-overlay.hidden { display: none; }
+.analysis-progress-box {
+  background: var(--surf); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 28px 32px;
+  width: 420px; display: flex; flex-direction: column; gap: 14px;
+}
+.analysis-progress-box h2 { font-size: 16px; font-weight: 700; }
+
+/* ── Misc ──────────────────────────────────────────────────────────────────── */
+.hidden { display: none !important; }
+.fade { opacity: 0.4; }
+</style>
+</head>
+<body>
+
+<!-- ── Setup screen ──────────────────────────────────────────────────────── -->
+<div id="setup-screen" class="hidden">
+  <div class="setup-icon">🎬</div>
+  <div class="setup-title">swachh</div>
+  <div class="setup-subtitle">Choose a project folder to get started. The app will find all video files recursively across nested folders.</div>
+
+  <div id="ffmpeg-warning" class="setup-warning hidden">
+    <div class="setup-warning-title">⚠ ffmpeg not found</div>
+    <div class="setup-warning-body">
+      ffmpeg is required to generate thumbnails and read video metadata.<br><br>
+      Install via Homebrew:<br>
+      <code>brew install ffmpeg</code><br><br>
+      Then restart this app.
+    </div>
+  </div>
+
+  <button class="btn-primary" id="btn-pick-folder">Choose Video Folder</button>
+</div>
+
+<!-- ── Extraction progress screen ────────────────────────────────────────── -->
+<div id="loading-screen" class="hidden">
+  <div class="setup-icon">⚙️</div>
+  <div class="setup-title">Scanning Videos</div>
+  <div class="progress-detail" id="progress-detail">Starting…</div>
+  <div class="progress-wrap">
+    <div class="progress-label"><span id="progress-done">0</span> / <span id="progress-total">0</span> clips processed</div>
+    <div class="progress-bar-track"><div class="progress-bar-fill" id="progress-bar"></div></div>
+    <div class="progress-current" id="progress-current"></div>
+  </div>
+</div>
+
+<!-- ── Main app ───────────────────────────────────────────────────────────── -->
+<div id="root" class="hidden">
+  <!-- Title bar -->
+  <div id="titlebar">
+    <div class="title-logo">🎬 swachh</div>
+    <div class="title-folder" id="folder-label"></div>
+    <div class="title-spacer"></div>
+    <button class="btn-icon" id="btn-change-folder" title="Change project folder">📁</button>
+    <button class="btn-icon" id="btn-rescan" title="Re-scan folder for new clips">🔄</button>
+    <button class="btn-icon" id="btn-trash-review" title="Review clips marked for deletion">
+      🗑 <span id="trash-count" class="badge-count hidden">0</span>
+    </button>
+    <button class="btn-icon" id="btn-toggle-sidebar" title="Toggle filters (F)">☰</button>
+    <button class="btn-icon" id="btn-settings" title="Settings (API key for AI analysis)">⚙</button>
+  </div>
+
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <div class="search-wrap">
+      <span class="icon">🔍</span>
+      <input id="search-input" type="text" placeholder="Search clips, tags, notes…">
+    </div>
+    <div class="toolbar-sep"></div>
+
+    <span class="seg-label">Group</span>
+    <button class="seg-btn active" data-group="day">Day</button>
+    <button class="seg-btn" data-group="camera">Camera</button>
+    <button class="seg-btn" data-group="folder">Folder</button>
+    <button class="seg-btn" data-group="none">None</button>
+
+    <div class="toolbar-sep"></div>
+    <span class="seg-label">Sort</span>
+    <select class="toolbar-select" id="sort-select">
+      <option value="date">Date</option>
+      <option value="duration">Duration</option>
+      <option value="name">Filename</option>
+      <option value="size">File size</option>
+    </select>
+
+    <div class="toolbar-sep"></div>
+    <button class="seg-btn" data-filter="starred" title="Show starred only">⭐ Starred</button>
+    <button class="seg-btn" data-filter="blank" title="Show blank/accidental candidates">⚠ Blank</button>
+    <button class="seg-btn" data-filter="untagged" title="Show untagged clips">🏷 Untagged</button>
+
+    <div class="toolbar-sep"></div>
+    <button class="btn-analyze" id="btn-analyze-all" title="Analyze all visible clips with AI (requires API key)">✨ Analyze All</button>
+  </div>
+
+  <!-- Main content -->
+  <div id="content">
+    <!-- Filter sidebar -->
+    <div id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-title">Camera</div>
+        <div id="filter-cameras"></div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-title">Day</div>
+        <div id="filter-days"></div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-title">Focal Length</div>
+        <div id="filter-focal"></div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-title">Resolution</div>
+        <div id="filter-res"></div>
+      </div>
+    </div>
+
+    <!-- Grid -->
+    <div id="grid-area">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-state-icon">🎬</div>
+        <div class="empty-state-text">No clips loaded</div>
+      </div>
+      <div id="clip-grid-container"></div>
+    </div>
+
+    <!-- Detail panel -->
+    <div id="detail-panel">
+      <div class="detail-header">
+        <div class="detail-title" id="detail-filename">—</div>
+        <button class="btn-icon" id="btn-close-detail" title="Close (Esc)">✕</button>
+      </div>
+
+      <div class="video-wrap">
+        <video id="detail-video" controls preload="metadata"></video>
+        <canvas id="lut-canvas"></canvas>
+        <div id="video-msg" class="video-unsupported hidden"></div>
+        <div class="video-controls">
+          <button class="vc-btn" id="vc-loop" title="Loop">↺</button>
+          <button class="vc-lut-btn" id="vc-lut" title="Toggle LUT preview">LUT</button>
+          <div style="flex:1"></div>
+          <span style="font-size:11px;color:var(--text3)">Speed:</span>
+          <select class="vc-speed" id="vc-speed">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="detail-scroll">
+        <!-- Camera metadata -->
+        <div class="detail-section">
+          <div class="detail-section-title">Camera</div>
+          <div class="meta-grid" id="meta-camera"></div>
+        </div>
+
+        <!-- File info -->
+        <div class="detail-section">
+          <div class="detail-section-title">File</div>
+          <div class="meta-grid" id="meta-file"></div>
+        </div>
+
+        <!-- AI Analysis -->
+        <div class="detail-section">
+          <div class="detail-section-title">AI Analysis</div>
+          <div id="analysis-display">
+            <div class="analysis-empty">Not yet analyzed.</div>
+          </div>
+          <div style="margin-top:8px">
+            <button class="btn-analyze" id="btn-analyze-clip">✨ Analyze this clip</button>
+          </div>
+        </div>
+
+        <!-- Tags -->
+        <div class="detail-section">
+          <div class="detail-section-title">Tags</div>
+          <div class="tags-wrap" id="active-tags"></div>
+          <div class="preset-tags" id="preset-tags-row"></div>
+          <div class="tag-input-wrap">
+            <input class="tag-input" id="tag-input" type="text" placeholder="Add tag…" maxlength="32">
+            <button class="btn-add-tag" id="btn-add-tag">Add</button>
+          </div>
+        </div>
+
+        <!-- Notes -->
+        <div class="detail-section">
+          <div class="detail-section-title">Notes</div>
+          <textarea class="notes-area" id="notes-area" placeholder="Add notes about this clip…" rows="3"></textarea>
+        </div>
+
+        <!-- Actions -->
+        <div class="detail-section">
+          <div class="detail-section-title">Actions</div>
+          <div class="detail-actions">
+            <button class="btn-action btn-star" id="btn-star">⭐ Star this clip</button>
+            <button class="btn-action btn-finder" id="btn-show-finder">📂 Show in Finder</button>
+            <button class="btn-action btn-delete" id="btn-mark-delete">🗑 Mark for deletion</button>
+          </div>
+        </div>
+
+        <!-- Keyboard hints -->
+        <div class="detail-section" style="margin-top:8px">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:var(--text3)">
+            <span><kbd>D</kbd> mark delete</span>
+            <span><kbd>S</kbd> star</span>
+            <span><kbd>T</kbd> focus tag</span>
+            <span><kbd>←</kbd><kbd>→</kbd> prev/next</span>
+            <span><kbd>Esc</kbd> close</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Settings modal ────────────────────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="settings-modal">
+  <div class="settings-modal">
+    <h2>⚙ Settings</h2>
+    <div class="settings-field">
+      <label>Anthropic API Key</label>
+      <input type="password" id="settings-api-key" placeholder="sk-ant-…" autocomplete="off">
+    </div>
+    <div class="settings-hint">
+      Required for AI video analysis (✨ Analyze). Get your key at
+      <a href="#" id="settings-api-link">console.anthropic.com</a>.
+      Stored locally on your computer, never in the project folder.
+    </div>
+
+    <div style="border-top:1px solid var(--border);padding-top:14px;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text3)">Preview LUT</div>
+      <div class="settings-lut-row">
+        <span class="settings-lut-name" id="settings-lut-name">No LUT loaded</span>
+        <button class="btn-cancel" id="btn-select-lut" style="font-size:11px;padding:4px 10px">Choose .cube…</button>
+        <button class="btn-cancel" id="btn-clear-lut" style="font-size:11px;padding:4px 10px">Clear</button>
+      </div>
+      <div style="font-size:10px;color:var(--text3);line-height:1.5">
+        Apply a .cube LUT to the video player to preview log footage. Toggle with the LUT button below the video.
+      </div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);padding-top:14px;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text3)">API Usage</div>
+      <div class="meta-grid" id="usage-grid" style="row-gap:5px"></div>
+      <div style="font-size:10px;color:var(--text3);line-height:1.5">
+        Token counts are from the Anthropic API response. Check current pricing at
+        <a href="#" id="settings-pricing-link" style="color:var(--accent);text-decoration:none">anthropic.com/pricing</a>.
+      </div>
+      <button class="btn-cancel" id="btn-reset-usage" style="align-self:flex-start;font-size:11px;padding:4px 10px">Reset usage stats</button>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btn-settings-cancel">Cancel</button>
+      <button class="btn-primary" id="btn-settings-save" style="padding:7px 16px;font-size:13px">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Analysis progress overlay ──────────────────────────────────────────── -->
+<div id="analysis-overlay" class="hidden">
+  <div class="analysis-progress-box">
+    <h2>✨ Analyzing Clips</h2>
+    <div class="progress-label" id="analysis-progress-label">0 / 0 clips</div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="analysis-progress-bar" style="background:var(--purple)"></div>
+    </div>
+    <div class="progress-current" id="analysis-progress-current"></div>
+    <div class="modal-actions" style="margin-top:4px">
+      <button class="btn-cancel" id="btn-cancel-analysis">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Trash review modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="trash-modal">
+  <div class="modal">
+    <h2>🗑 Review Delete List</h2>
+    <div class="modal-desc">
+      These clips are marked for deletion. Review and remove any you want to keep, then confirm to move them all to the macOS Trash.
+    </div>
+    <div class="modal-list" id="trash-modal-list"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btn-trash-cancel">Cancel</button>
+      <button class="btn-confirm-delete" id="btn-trash-confirm">Move <span id="trash-confirm-count">0</span> to Trash</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast container ────────────────────────────────────────────────────── -->
+<div id="toast-container"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════════════════════════
+const state = {
+  clips: [],           // all clips merged with user data
+  filteredClips: [],   // after filters applied
+  selectedIndex: -1,   // index into filteredClips
+  groupBy: 'day',      // 'day' | 'camera' | 'folder' | 'none'
+  sortBy: 'date',
+  search: '',
+  filters: {
+    cameras:  new Set(),  // checked camera types
+    days:     new Set(),
+    focal:    new Set(),
+    res:      new Set(),
+    starred:  false,
+    blank:    false,
+    untagged: false,
+  },
+  sidebarOpen: true,
+  pendingDeleteList: [], // for the trash review modal
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Utility
+// ═══════════════════════════════════════════════════════════════════════════
+function fmt_dur(s) {
+  if (!s) return '—';
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return m > 0 ? `${m}:${String(sec).padStart(2,'0')}` : `0:${String(sec).padStart(2,'0')}`;
+}
+function fmt_size(b) {
+  if (b > 1e9) return `${(b/1e9).toFixed(1)} GB`;
+  if (b > 1e6) return `${(b/1e6).toFixed(0)} MB`;
+  return `${(b/1e3).toFixed(0)} KB`;
+}
+function fmt_res(w, h) {
+  if (!w) return '';
+  if (w >= 3840) return '4K';
+  if (w >= 2560) return '2.5K';
+  if (w >= 1920) return 'FHD';
+  if (w >= 1280) return 'HD';
+  return `${w}×${h}`;
+}
+function fmt_date(dateStr) {
+  if (!dateStr) return '—';
+  try {
+    const d = new Date(dateStr.replace('+0900','+09:00'));
+    return d.toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+  } catch { return dateStr; }
+}
+function day_label(day) {
+  if (!day) return 'Unknown Date';
+  try {
+    const d = new Date(day + 'T12:00:00Z');
+    return d.toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+  } catch { return day; }
+}
+function cam_chip_class(type) {
+  return `clip-chip chip-${type || 'unknown'}`;
+}
+function toast(msg, dur = 2500) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), dur);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Boot
+// ═══════════════════════════════════════════════════════════════════════════
+async function boot() {
+  const info = await window.organizer.check();
+
+  // Check ffmpeg
+  if (!info.ffprobeOk || !info.ffmpegOk) {
+    document.getElementById('ffmpeg-warning').classList.remove('hidden');
+  }
+
+  if (!info.projectFolder) {
+    // No folder saved — show setup screen
+    showSetup();
+    return;
+  }
+
+  document.getElementById('folder-label').textContent = info.projectFolder.split('/').pop();
+
+  if (!info.clipsExist) {
+    // Folder known but not yet scanned
+    showLoading();
+    const r = await window.organizer.startExtraction();
+    if (r.error) { alert(r.error); showSetup(); return; }
+    listenExtraction(() => loadAndShowApp());
+  } else {
+    await loadAndShowApp();
+  }
+}
+
+function showSetup() {
+  document.getElementById('setup-screen').classList.remove('hidden');
+  document.getElementById('loading-screen').classList.add('hidden');
+  document.getElementById('root').classList.add('hidden');
+}
+
+function showLoading() {
+  document.getElementById('setup-screen').classList.add('hidden');
+  document.getElementById('loading-screen').classList.remove('hidden');
+  document.getElementById('root').classList.add('hidden');
+}
+
+function showApp() {
+  document.getElementById('setup-screen').classList.add('hidden');
+  document.getElementById('loading-screen').classList.add('hidden');
+  document.getElementById('root').classList.remove('hidden');
+}
+
+function listenExtraction(onComplete) {
+  const unsub = window.organizer.onExtractionProgress(data => {
+    const pct = data.total ? (data.done / data.total * 100) : 0;
+    document.getElementById('progress-bar').style.width = pct + '%';
+    document.getElementById('progress-done').textContent = data.done;
+    document.getElementById('progress-total').textContent = data.total;
+    document.getElementById('progress-current').textContent = data.current || '';
+
+    let detail = data.running ? `Extracting metadata and thumbnails…` : '✓ Complete!';
+    if (data.complete && data.errors && data.errors.length) {
+      detail = `Done — ${data.errors.length} file(s) could not be read`;
+    }
+    document.getElementById('progress-detail').textContent = detail;
+
+    if (data.complete) {
+      unsub();
+      setTimeout(onComplete, 600);
+    }
+  });
+}
+
+async function loadAndShowApp() {
+  await loadSettings();
+  state.clips = await window.organizer.getClips();
+  buildSidebarFilters();
+  applyFilters();
+
+  // Show a helpful hint if 0 clips came back
+  const emptyText = document.querySelector('#empty-state .empty-state-text');
+  if (state.clips.length === 0) {
+    emptyText.textContent = 'No clips found. Make sure the folder contains .mov, .mp4, .mkv, .avi, or .mts files and try Rescan.';
+  } else {
+    emptyText.textContent = 'No clips match the current filters.';
+  }
+
+  renderGrid();
+  updateTrashCount();
+  showApp();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sidebar filter building
+// ═══════════════════════════════════════════════════════════════════════════
+function buildSidebarFilters() {
+  buildCheckGroup('filter-cameras', countBy('cameraType'), (v) => state.filters.cameras.has(v), (v,checked) => {
+    if (checked) state.filters.cameras.add(v); else state.filters.cameras.delete(v);
+    applyFilters(); renderGrid();
+  }, (v) => {
+    const labels = { iphone:'iPhone', fujifilm:'Fujifilm X-E4', sony:'Sony XAVC', unknown:'Unknown' };
+    return `<span class="cam-dot cam-${v}"></span>${labels[v] || v}`;
+  });
+
+  buildCheckGroup('filter-days', countBy('day'), (v) => state.filters.days.has(v), (v,checked) => {
+    if (checked) state.filters.days.add(v); else state.filters.days.delete(v);
+    applyFilters(); renderGrid();
+  }, (v) => v || 'Unknown');
+
+  buildCheckGroup('filter-focal', countBy('focalLength'), (v) => state.filters.focal.has(v), (v,checked) => {
+    if (checked) state.filters.focal.add(v); else state.filters.focal.delete(v);
+    applyFilters(); renderGrid();
+  });
+
+  buildCheckGroup('filter-res', countBy(c => fmt_res(c.width, c.height)), (v) => state.filters.res.has(v), (v,checked) => {
+    if (checked) state.filters.res.add(v); else state.filters.res.delete(v);
+    applyFilters(); renderGrid();
+  });
+}
+
+function countBy(keyOrFn) {
+  const map = {};
+  for (const c of state.clips) {
+    const k = typeof keyOrFn === 'function' ? keyOrFn(c) : c[keyOrFn];
+    if (k) map[k] = (map[k] || 0) + 1;
+  }
+  return map;
+}
+
+function buildCheckGroup(containerId, counts, isChecked, onChange, labelFn) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = '';
+  const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]);
+  for (const [val, count] of sorted) {
+    const id = `chk-${containerId}-${val}`;
+    const div = document.createElement('div');
+    div.className = 'filter-opt';
+    div.innerHTML = `
+      <input type="checkbox" id="${id}" ${isChecked(val) ? 'checked' : ''}>
+      <label for="${id}">${labelFn ? labelFn(val) : val}</label>
+      <span class="count">${count}</span>
+    `;
+    div.querySelector('input').addEventListener('change', e => onChange(val, e.target.checked));
+    el.appendChild(div);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Filter & sort
+// ═══════════════════════════════════════════════════════════════════════════
+function applyFilters() {
+  let clips = [...state.clips];
+
+  // Search
+  if (state.search) {
+    const q = state.search.toLowerCase();
+    clips = clips.filter(c =>
+      c.filename.toLowerCase().includes(q) ||
+      (c.tags || []).some(t => t.toLowerCase().includes(q)) ||
+      (c.notes || '').toLowerCase().includes(q) ||
+      (c.subfolder || '').toLowerCase().includes(q) ||
+      (c.camera || '').toLowerCase().includes(q) ||
+      (c.focalLength || '').toLowerCase().includes(q) ||
+      (c.analysis && (
+        (c.analysis.description || '').toLowerCase().includes(q) ||
+        (c.analysis.activity || '').toLowerCase().includes(q) ||
+        (c.analysis.setting || '').toLowerCase().includes(q) ||
+        (c.analysis.subjects || []).some(s => s.toLowerCase().includes(q)) ||
+        (c.analysis.suggestedTags || []).some(t => t.toLowerCase().includes(q))
+      ))
+    );
+  }
+
+  // Sidebar filters
+  if (state.filters.cameras.size) clips = clips.filter(c => state.filters.cameras.has(c.cameraType));
+  if (state.filters.days.size)    clips = clips.filter(c => state.filters.days.has(c.day));
+  if (state.filters.focal.size)   clips = clips.filter(c => state.filters.focal.has(c.focalLength));
+  if (state.filters.res.size)     clips = clips.filter(c => state.filters.res.has(fmt_res(c.width, c.height)));
+
+  // Toggle filters
+  if (state.filters.starred)  clips = clips.filter(c => c.starred);
+  if (state.filters.blank)    clips = clips.filter(c => c.isBlankCandidate);
+  if (state.filters.untagged) clips = clips.filter(c => !(c.tags || []).length);
+
+  // Sort
+  clips.sort((a, b) => {
+    switch (state.sortBy) {
+      case 'duration': return (b.duration || 0) - (a.duration || 0);
+      case 'name':     return a.filename.localeCompare(b.filename);
+      case 'size':     return (b.size || 0) - (a.size || 0);
+      default:         return (a.date || a.relativePath || '').localeCompare(b.date || b.relativePath || '');
+    }
+  });
+
+  state.filteredClips = clips;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Grid rendering
+// ═══════════════════════════════════════════════════════════════════════════
+function renderGrid() {
+  const container = document.getElementById('clip-grid-container');
+  const empty     = document.getElementById('empty-state');
+
+  if (!state.filteredClips.length) {
+    empty.classList.remove('hidden');
+    container.innerHTML = '';
+    return;
+  }
+  empty.classList.add('hidden');
+
+  // Group clips
+  const groups = groupClips(state.filteredClips);
+  const frag   = document.createDocumentFragment();
+
+  for (const { label, clips: groupClips, subgroups } of groups) {
+    const groupEl = document.createElement('div');
+    groupEl.className = 'day-group';
+
+    const header = document.createElement('div');
+    header.className = 'day-header';
+    const totalDur = groupClips.reduce((s, c) => s + (c.duration || 0), 0);
+    header.innerHTML = `
+      <span class="day-title">${label}</span>
+      <span class="day-meta">${groupClips.length} clip${groupClips.length !== 1 ? 's' : ''} · ${fmt_dur(totalDur)}</span>
+    `;
+    groupEl.appendChild(header);
+
+    if (subgroups) {
+      // Render with subfolder sub-headings
+      for (const [subLabel, subClips] of Object.entries(subgroups)) {
+        if (subLabel) {
+          const subHead = document.createElement('div');
+          subHead.className = 'subfolder-label';
+          subHead.style.padding = '6px 16px 2px';
+          subHead.textContent = '📁 ' + subLabel;
+          groupEl.appendChild(subHead);
+        }
+        const grid = makeGrid(subClips);
+        groupEl.appendChild(grid);
+      }
+    } else {
+      groupEl.appendChild(makeGrid(groupClips));
+    }
+
+    frag.appendChild(groupEl);
+  }
+
+  container.innerHTML = '';
+  container.appendChild(frag);
+}
+
+function makeGrid(clips) {
+  const grid = document.createElement('div');
+  grid.className = 'clip-grid';
+  for (const clip of clips) {
+    grid.appendChild(makeCard(clip));
+  }
+  return grid;
+}
+
+function groupClips(clips) {
+  if (state.groupBy === 'none') {
+    return [{ label: 'All Clips', clips }];
+  }
+
+  const map = new Map();
+  for (const clip of clips) {
+    let key;
+    if (state.groupBy === 'day')    key = clip.day || 'Unknown Date';
+    if (state.groupBy === 'camera') key = clip.camera || 'Unknown Camera';
+    if (state.groupBy === 'folder') key = clip.subfolder || 'Root';
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(clip);
+  }
+
+  return Array.from(map.entries()).map(([key, groupClips]) => {
+    const label = state.groupBy === 'day' ? day_label(key) : key;
+
+    // For day grouping, also sub-group by subfolder if there are multiple
+    let subgroups = null;
+    if (state.groupBy === 'day') {
+      const folders = [...new Set(groupClips.map(c => c.subfolder || ''))];
+      if (folders.length > 1) {
+        subgroups = {};
+        for (const f of folders) {
+          subgroups[f] = groupClips.filter(c => (c.subfolder || '') === f);
+        }
+      }
+    }
+
+    return { label, clips: groupClips, subgroups };
+  });
+}
+
+function makeCard(clip) {
+  const idx   = state.filteredClips.indexOf(clip);
+  const isSelected = idx === state.selectedIndex;
+  const card  = document.createElement('div');
+  card.className = [
+    'clip-card',
+    isSelected ? 'selected' : '',
+    clip.markedDelete ? 'marked-delete' : '',
+    clip.starred ? 'starred' : '',
+  ].filter(Boolean).join(' ');
+  card.dataset.index = idx;
+
+  const hasThumb = !!clip.thumbnail;
+  const thumbSrc = hasThumb ? window.organizer.thumbUrl(clip.thumbnail) : '';
+
+  const tags = (clip.tags || []).slice(0, 2).map(t =>
+    `<span class="tag-chip">${t}</span>`
+  ).join('');
+
+  card.innerHTML = `
+    <div class="thumb-wrap">
+      ${hasThumb
+        ? `<img src="${thumbSrc}" loading="lazy" alt="" onerror="this.parentElement.innerHTML='<div class=no-thumb>🎬</div>'">`
+        : '<div class="no-thumb">🎬</div>'
+      }
+      <span class="dur-badge">${fmt_dur(clip.duration)}</span>
+      ${clip.width ? `<span class="res-badge">${fmt_res(clip.width, clip.height)}</span>` : ''}
+      ${clip.isBlankCandidate ? '<span class="blank-badge">BLANK?</span>' : ''}
+      ${clip.markedDelete ? '<span class="delete-badge">🗑</span>' : ''}
+      <span class="star-badge">⭐</span>
+    </div>
+    <div class="clip-info">
+      <div class="clip-filename">${clip.filename}</div>
+      <div class="clip-meta-row">
+        <span class="${cam_chip_class(clip.cameraType)}">${clip.camera || '?'}</span>
+        ${clip.focalLength ? `<span class="clip-chip chip-focal">${clip.focalLength}</span>` : ''}
+        ${tags}
+      </div>
+    </div>
+  `;
+
+  card.addEventListener('click', () => selectClip(idx));
+  return card;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Detail panel
+// ═══════════════════════════════════════════════════════════════════════════
+function selectClip(idx) {
+  state.selectedIndex = idx;
+  renderGrid(); // re-render to update selected state
+  const clip = state.filteredClips[idx];
+  if (!clip) { closeDetail(); return; }
+
+  document.getElementById('detail-panel').classList.add('open');
+
+  // Video — fully reset before changing clip to prevent stale state
+  const vid    = document.getElementById('detail-video');
+  const msgEl  = document.getElementById('video-msg');
+  stopLUTLoop(); // stop rAF before src change
+  vid.pause();
+  vid.onerror  = null;
+  vid.onloadedmetadata = null;
+  vid.removeAttribute('src');
+  vid.load(); // abort any in-flight request
+  vid.style.display = 'block';
+  vid.style.maxHeight = '320px';
+  msgEl.innerHTML = '';
+  msgEl.classList.add('hidden');
+
+  function showVideoMsg(html) {
+    msgEl.innerHTML = html;
+    msgEl.classList.remove('hidden');
+    vid.style.display = 'none';
+    msgEl.querySelectorAll('[data-qt]').forEach(el =>
+      el.addEventListener('click', e => { e.preventDefault(); window.organizer.showInFinder(clip.relativePath); })
+    );
+  }
+
+  const codec = (clip.codec || '').toLowerCase();
+  const isIphone = clip.cameraType === 'iphone';
+  const isUnsupportedCodec = codec === 'prores' || codec === 'prores_ks' || codec === 'dnxhd';
+
+  if (isIphone || isUnsupportedCodec) {
+    // Show proxy thumbnail instead of attempting video playback
+    const thumbSrc = clip.thumbnail ? window.organizer.thumbUrl(clip.thumbnail) : null;
+    const label = isIphone ? 'iPhone (ProRes/HEVC)' : codec.startsWith('prores') ? 'ProRes' : 'DNxHD';
+    showVideoMsg(
+      (thumbSrc ? `<img src="${thumbSrc}" style="max-width:100%;max-height:280px;object-fit:contain;display:block;border-radius:4px">` : '') +
+      `<div style="margin-top:${thumbSrc ? 8 : 0}px;font-size:11px;color:var(--text3)">
+        Proxy frame · ${label} · <a href="#" data-qt style="color:var(--accent)">Open in QuickTime</a>
+      </div>`
+    );
+  } else {
+    vid.onerror = () => {
+      const code = vid.error?.code;
+      if (code === 4) {
+        showVideoMsg(`<strong>Preview unavailable</strong>
+          This codec isn't supported in Electron (may be HEVC or ProRes).<br>
+          <a href="#" data-qt style="color:var(--accent)">Open in QuickTime</a>`);
+      } else {
+        showVideoMsg(`<strong>Playback error</strong>MediaError code ${code || '?'}`);
+      }
+    };
+    vid.onloadedmetadata = () => {
+      // Portrait videos: allow more height so content isn't tiny
+      const isPortrait = vid.videoHeight > vid.videoWidth;
+      vid.style.maxHeight = isPortrait ? '420px' : '320px';
+      // Re-apply LUT now that video dimensions are known
+      if (lut.enabled && lut.data) applyLUTState();
+    };
+    vid.src = window.organizer.videoUrl(clip.relativePath);
+    vid.load();
+    vid.play().catch(() => {});
+  }
+
+  // Header
+  document.getElementById('detail-filename').textContent = clip.filename;
+
+  // Camera metadata
+  const camMeta = [];
+  if (clip.camera)       camMeta.push(['Camera', clip.camera]);
+  if (clip.focalLength)  camMeta.push(['Focal length', clip.focalLength]);
+  if (clip.aperture)     camMeta.push(['Aperture', clip.aperture]);
+  if (clip.iso)          camMeta.push(['ISO', clip.iso]);
+  if (clip.shutter)      camMeta.push(['Shutter', clip.shutter]);
+  if (clip.whiteBalance) camMeta.push(['White balance', clip.whiteBalance]);
+  if (clip.lut)          camMeta.push(['LUT', clip.lut]);
+  if (clip.dayNight)     camMeta.push(['Day/Night', clip.dayNight]);
+  if (clip.environment)  camMeta.push(['Environment', clip.environment]);
+  if (clip.gps) {
+    const mapsUrl = `https://maps.google.com/?q=${clip.gps.lat},${clip.gps.lng}`;
+    camMeta.push(['GPS', `<a href="${mapsUrl}" target="_blank">${clip.gps.lat.toFixed(5)}, ${clip.gps.lng.toFixed(5)}</a>`]);
+  }
+  renderMeta('meta-camera', camMeta);
+
+  // File metadata
+  const fileMeta = [
+    ['Filename', clip.filename],
+    clip.subfolder ? ['Subfolder', clip.subfolder] : null,
+    ['Duration', fmt_dur(clip.duration)],
+    ['Resolution', clip.width ? `${clip.width}×${clip.height}` : '—'],
+    ['FPS', clip.fps || '—'],
+    ['Codec', clip.codec || '—'],
+    ['Size', fmt_size(clip.size)],
+    ['Recorded', fmt_date(clip.date)],
+  ].filter(Boolean);
+  renderMeta('meta-file', fileMeta);
+
+  // Tags
+  renderDetailTags(clip);
+
+  // Notes
+  const notesArea = document.getElementById('notes-area');
+  notesArea.value = clip.notes || '';
+  notesArea.oninput = debounce(() => {
+    clip.notes = notesArea.value;
+    window.organizer.updateClip(clip.relativePath, { notes: notesArea.value });
+  }, 600);
+
+  // Actions
+  const btnStar   = document.getElementById('btn-star');
+  const btnDelete = document.getElementById('btn-mark-delete');
+  btnStar.className   = `btn-action btn-star ${clip.starred ? 'starred' : ''}`;
+  btnStar.textContent = clip.starred ? '★ Starred' : '⭐ Star this clip';
+  btnDelete.className = `btn-action btn-delete ${clip.markedDelete ? 'marked' : ''}`;
+  btnDelete.textContent = clip.markedDelete ? '✓ Marked for deletion' : '🗑 Mark for deletion';
+
+  // Analysis
+  updateAnalysisDisplay(clip);
+  const btnAnalyze = document.getElementById('btn-analyze-clip');
+  btnAnalyze.classList.remove('loading');
+  btnAnalyze.textContent = '✨ Analyze this clip';
+}
+
+function renderMeta(id, rows) {
+  const el = document.getElementById(id);
+  el.innerHTML = rows.map(([k,v]) => `
+    <span class="meta-key">${k}</span>
+    <span class="meta-val">${v}</span>
+  `).join('');
+}
+
+function renderDetailTags(clip) {
+  const PRESETS = ['⛩ shrine','🌸 blossoms','🏙 street','🍜 food','🚅 train','🏔 nature',
+                   '👥 people','🌙 night','🏨 hotel','🛍 shopping','🎭 festival','📸 b-roll','⭐ hero'];
+  const activeTags = clip.tags || [];
+
+  // Active tags (click to remove)
+  const wrap = document.getElementById('active-tags');
+  wrap.innerHTML = activeTags.map(t => `
+    <span class="tag-pill" data-tag="${t}">${t} <span class="tag-x"></span></span>
+  `).join('');
+  wrap.querySelectorAll('.tag-pill').forEach(el => {
+    el.addEventListener('click', () => removeTag(clip, el.dataset.tag));
+  });
+
+  // Preset tags
+  const presetRow = document.getElementById('preset-tags-row');
+  presetRow.innerHTML = PRESETS.map(p => `
+    <span class="preset-tag ${activeTags.includes(p) ? 'applied' : ''}" data-tag="${p}">${p}</span>
+  `).join('');
+  presetRow.querySelectorAll('.preset-tag').forEach(el => {
+    el.addEventListener('click', () => {
+      if (activeTags.includes(el.dataset.tag)) removeTag(clip, el.dataset.tag);
+      else addTag(clip, el.dataset.tag);
+    });
+  });
+}
+
+async function addTag(clip, tag) {
+  if (!tag.trim()) return;
+  const tags = [...new Set([...(clip.tags || []), tag.trim()])];
+  clip.tags = tags;
+  await window.organizer.updateClip(clip.relativePath, { tags });
+  renderDetailTags(clip);
+  renderCardTags(clip);
+  document.getElementById('tag-input').value = '';
+}
+
+async function removeTag(clip, tag) {
+  clip.tags = (clip.tags || []).filter(t => t !== tag);
+  await window.organizer.updateClip(clip.relativePath, { tags: clip.tags });
+  renderDetailTags(clip);
+  renderCardTags(clip);
+}
+
+function renderCardTags(clip) {
+  // Re-render just the matching card without full grid redraw
+  const idx  = state.filteredClips.indexOf(clip);
+  const card = document.querySelector(`.clip-card[data-index="${idx}"]`);
+  if (card) {
+    const newCard = makeCard(clip);
+    card.replaceWith(newCard);
+  }
+}
+
+function closeDetail() {
+  state.selectedIndex = -1;
+  document.getElementById('detail-panel').classList.remove('open');
+  const vid = document.getElementById('detail-video');
+  vid.pause();
+  vid.onerror = null;
+  vid.removeAttribute('src');
+  vid.load();
+  vid.style.display = 'block';
+  const msgEl = document.getElementById('video-msg');
+  msgEl.innerHTML = '';
+  msgEl.classList.add('hidden');
+  renderGrid();
+}
+
+function debounce(fn, ms) {
+  let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Star / Delete
+// ═══════════════════════════════════════════════════════════════════════════
+async function toggleStar(clip) {
+  clip.starred = !clip.starred;
+  await window.organizer.updateClip(clip.relativePath, { starred: clip.starred });
+  const btn = document.getElementById('btn-star');
+  btn.className   = `btn-action btn-star ${clip.starred ? 'starred' : ''}`;
+  btn.textContent = clip.starred ? '★ Starred' : '⭐ Star this clip';
+  renderCardTags(clip);
+  toast(clip.starred ? '⭐ Starred' : 'Star removed');
+}
+
+async function toggleMarkDelete(clip) {
+  clip.markedDelete = !clip.markedDelete;
+  await window.organizer.updateClip(clip.relativePath, { markedDelete: clip.markedDelete });
+  const btn = document.getElementById('btn-mark-delete');
+  btn.className   = `btn-action btn-delete ${clip.markedDelete ? 'marked' : ''}`;
+  btn.textContent = clip.markedDelete ? '✓ Marked for deletion' : '🗑 Mark for deletion';
+  renderCardTags(clip);
+  updateTrashCount();
+  toast(clip.markedDelete ? '🗑 Marked for deletion' : 'Delete mark removed');
+}
+
+function updateTrashCount() {
+  const n    = state.clips.filter(c => c.markedDelete).length;
+  const badge = document.getElementById('trash-count');
+  badge.textContent = n;
+  badge.classList.toggle('hidden', n === 0);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Trash review modal
+// ═══════════════════════════════════════════════════════════════════════════
+async function openTrashModal() {
+  state.pendingDeleteList = state.clips.filter(c => c.markedDelete);
+  renderTrashModal();
+  document.getElementById('trash-modal').classList.remove('hidden');
+}
+
+function renderTrashModal() {
+  const list  = document.getElementById('trash-modal-list');
+  const count = document.getElementById('trash-confirm-count');
+  const btn   = document.getElementById('btn-trash-confirm');
+  const n     = state.pendingDeleteList.length;
+
+  count.textContent = n;
+  btn.disabled      = n === 0;
+
+  list.innerHTML = state.pendingDeleteList.map((c, i) => `
+    <div class="modal-item">
+      <span class="modal-item-name" title="${c.relativePath}">${c.relativePath}</span>
+      <span class="modal-item-dur">${fmt_dur(c.duration)}</span>
+      <span class="modal-item-rm" data-idx="${i}" title="Remove from list">✕</span>
+    </div>
+  `).join('') || '<div class="modal-item" style="justify-content:center;color:var(--text3)">No clips marked</div>';
+
+  list.querySelectorAll('.modal-item-rm').forEach(el => {
+    el.addEventListener('click', () => {
+      state.pendingDeleteList.splice(parseInt(el.dataset.idx), 1);
+      renderTrashModal();
+    });
+  });
+}
+
+async function confirmTrash() {
+  if (!state.pendingDeleteList.length) return;
+  const paths   = state.pendingDeleteList.map(c => c.relativePath);
+  const btn     = document.getElementById('btn-trash-confirm');
+  btn.textContent = 'Deleting…';
+  btn.disabled    = true;
+
+  const result = await window.organizer.trashMultiple(paths);
+
+  // Remove trashed from state.clips
+  const trashed = new Set(result.trashed || []);
+  state.clips   = state.clips.filter(c => !trashed.has(c.relativePath));
+  applyFilters();
+  renderGrid();
+  updateTrashCount();
+
+  document.getElementById('trash-modal').classList.add('hidden');
+  toast(`🗑 ${result.trashed.length} clip${result.trashed.length !== 1 ? 's' : ''} moved to Trash`);
+  if (state.selectedIndex >= state.filteredClips.length) closeDetail();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Event wiring
+// ═══════════════════════════════════════════════════════════════════════════
+document.getElementById('btn-pick-folder').addEventListener('click', async () => {
+  const result = await window.organizer.selectFolder();
+  if (!result) return;
+  document.getElementById('folder-label').textContent = result.folder.split('/').pop();
+  if (!result.clipsExist) {
+    showLoading();
+    const r = await window.organizer.startExtraction();
+    if (r.error) { alert(r.error); return; }
+    listenExtraction(() => loadAndShowApp());
+  } else {
+    await loadAndShowApp();
+  }
+});
+
+document.getElementById('btn-change-folder').addEventListener('click', async () => {
+  const result = await window.organizer.selectFolder();
+  if (!result) return;
+  document.getElementById('folder-label').textContent = result.folder.split('/').pop();
+  state.clips = [];
+  state.filteredClips = [];
+  state.selectedIndex = -1;
+  document.getElementById('clip-grid-container').innerHTML = '';
+  if (!result.clipsExist) {
+    showLoading();
+    const r = await window.organizer.startExtraction();
+    if (r.error) { alert(r.error); return; }
+    listenExtraction(() => loadAndShowApp());
+  } else {
+    await loadAndShowApp();
+  }
+});
+
+document.getElementById('btn-rescan').addEventListener('click', async () => {
+  const r = await window.organizer.rescan();
+  if (r.error) { toast('Error: ' + r.error); return; }
+  if (r.alreadyRunning) { toast('Scan already running…'); return; }
+  showLoading();
+  listenExtraction(() => loadAndShowApp());
+  toast('Rescanning folder…');
+});
+
+document.getElementById('btn-toggle-sidebar').addEventListener('click', () => {
+  state.sidebarOpen = !state.sidebarOpen;
+  document.getElementById('sidebar').classList.toggle('hidden', !state.sidebarOpen);
+});
+
+document.getElementById('search-input').addEventListener('input', e => {
+  state.search = e.target.value;
+  applyFilters();
+  renderGrid();
+});
+
+// Group by buttons
+document.querySelectorAll('[data-group]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.groupBy = btn.dataset.group;
+    document.querySelectorAll('[data-group]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderGrid();
+  });
+});
+
+// Sort
+document.getElementById('sort-select').addEventListener('change', e => {
+  state.sortBy = e.target.value;
+  applyFilters();
+  renderGrid();
+});
+
+// Toggle filters
+document.querySelectorAll('[data-filter]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const f = btn.dataset.filter;
+    state.filters[f] = !state.filters[f];
+    btn.classList.toggle('active', state.filters[f]);
+    applyFilters();
+    renderGrid();
+  });
+});
+
+// Detail panel actions
+document.getElementById('btn-close-detail').addEventListener('click', closeDetail);
+document.getElementById('btn-star').addEventListener('click', () => {
+  const clip = state.filteredClips[state.selectedIndex];
+  if (clip) toggleStar(clip);
+});
+document.getElementById('btn-mark-delete').addEventListener('click', () => {
+  const clip = state.filteredClips[state.selectedIndex];
+  if (clip) toggleMarkDelete(clip);
+});
+document.getElementById('btn-show-finder').addEventListener('click', () => {
+  const clip = state.filteredClips[state.selectedIndex];
+  if (clip) window.organizer.showInFinder(clip.relativePath);
+});
+
+// Tag input
+document.getElementById('btn-add-tag').addEventListener('click', () => {
+  const clip = state.filteredClips[state.selectedIndex];
+  if (clip) addTag(clip, document.getElementById('tag-input').value);
+});
+document.getElementById('tag-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const clip = state.filteredClips[state.selectedIndex];
+    if (clip) addTag(clip, e.target.value);
+  }
+});
+
+// Video controls
+document.getElementById('vc-speed').addEventListener('change', e => {
+  document.getElementById('detail-video').playbackRate = parseFloat(e.target.value);
+});
+document.getElementById('vc-loop').addEventListener('click', () => {
+  const vid  = document.getElementById('detail-video');
+  vid.loop   = !vid.loop;
+  document.getElementById('vc-loop').style.color = vid.loop ? 'var(--accent)' : 'var(--text2)';
+});
+
+// Trash modal
+document.getElementById('btn-trash-review').addEventListener('click', openTrashModal);
+document.getElementById('btn-trash-cancel').addEventListener('click', () => {
+  document.getElementById('trash-modal').classList.add('hidden');
+});
+document.getElementById('btn-trash-confirm').addEventListener('click', confirmTrash);
+document.getElementById('trash-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Keyboard shortcuts
+// ═══════════════════════════════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  // Ignore when typing in inputs
+  if (['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) {
+    if (e.key === 'Escape') document.activeElement.blur();
+    return;
+  }
+
+  const clip = state.filteredClips[state.selectedIndex];
+
+  switch (e.key) {
+    case 'Escape':
+      closeDetail();
+      break;
+    case 'ArrowRight':
+    case 'ArrowDown':
+      e.preventDefault();
+      if (state.selectedIndex < state.filteredClips.length - 1)
+        selectClip(state.selectedIndex + 1);
+      break;
+    case 'ArrowLeft':
+    case 'ArrowUp':
+      e.preventDefault();
+      if (state.selectedIndex > 0)
+        selectClip(state.selectedIndex - 1);
+      break;
+    case 'd':
+    case 'D':
+      if (clip) toggleMarkDelete(clip);
+      break;
+    case 's':
+    case 'S':
+      if (clip) toggleStar(clip);
+      break;
+    case 't':
+    case 'T':
+      document.getElementById('tag-input').focus();
+      break;
+    case 'f':
+    case 'F':
+      state.sidebarOpen = !state.sidebarOpen;
+      document.getElementById('sidebar').classList.toggle('hidden', !state.sidebarOpen);
+      break;
+    case ' ':
+      e.preventDefault();
+      const vid = document.getElementById('detail-video');
+      if (vid.src) { vid.paused ? vid.play() : vid.pause(); }
+      break;
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Scroll selected card into view
+// ═══════════════════════════════════════════════════════════════════════════
+function scrollToSelected() {
+  const card = document.querySelector(`.clip-card[data-index="${state.selectedIndex}"]`);
+  if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Settings
+// ═══════════════════════════════════════════════════════════════════════════
+let settings = { apiKey: '' };
+
+async function loadSettings() {
+  const s = await window.organizer.getSettings();
+  settings.apiKey = s.apiKey || '';
+  settings.usage  = s.usage  || { inputTokens: 0, outputTokens: 0, clipsAnalyzed: 0 };
+  if (s.lutPath) await loadLUT(s.lutPath);
+}
+
+function openSettings() {
+  document.getElementById('settings-api-key').value = settings.apiKey || '';
+  updateLUTSettingsUI();
+
+  // Populate usage grid
+  const u = settings.usage || { inputTokens: 0, outputTokens: 0, clipsAnalyzed: 0 };
+  const totalK = n => n >= 1000 ? `${(n/1000).toFixed(1)}K` : String(n);
+  document.getElementById('usage-grid').innerHTML = `
+    <span class="meta-key">Clips analyzed</span><span class="meta-val">${u.clipsAnalyzed || 0}</span>
+    <span class="meta-key">Input tokens</span><span class="meta-val">${totalK(u.inputTokens || 0)}</span>
+    <span class="meta-key">Output tokens</span><span class="meta-val">${totalK(u.outputTokens || 0)}</span>
+  `;
+
+  document.getElementById('settings-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('settings-api-key').focus(), 50);
+}
+
+async function saveSettings() {
+  settings.apiKey = document.getElementById('settings-api-key').value.trim();
+  await window.organizer.saveSettings(settings);
+  document.getElementById('settings-modal').classList.add('hidden');
+  toast('⚙ Settings saved');
+}
+
+document.getElementById('btn-settings').addEventListener('click', openSettings);
+document.getElementById('btn-settings-cancel').addEventListener('click', () => {
+  document.getElementById('settings-modal').classList.add('hidden');
+});
+document.getElementById('btn-settings-save').addEventListener('click', saveSettings);
+document.getElementById('settings-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden');
+});
+document.getElementById('settings-api-key').addEventListener('keydown', e => {
+  if (e.key === 'Enter') saveSettings();
+  if (e.key === 'Escape') document.getElementById('settings-modal').classList.add('hidden');
+});
+document.getElementById('settings-api-link').addEventListener('click', e => {
+  e.preventDefault();
+  window.open('https://console.anthropic.com/');
+});
+document.getElementById('settings-pricing-link').addEventListener('click', e => {
+  e.preventDefault();
+  window.open('https://www.anthropic.com/pricing');
+});
+document.getElementById('btn-reset-usage').addEventListener('click', async () => {
+  if (!confirm('Reset usage stats to zero?')) return;
+  await window.organizer.resetUsage();
+  settings.usage = { inputTokens: 0, outputTokens: 0, clipsAnalyzed: 0 };
+  openSettings(); // refresh the display
+  toast('Usage stats reset');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LUT Preview — WebGL real-time 3D LUT application
+// ═══════════════════════════════════════════════════════════════════════════
+const lut = {
+  path:    null,   // file path (persisted)
+  size:    0,      // LUT grid size (e.g. 33)
+  data:    null,   // Float32Array of RGB values
+  enabled: false,  // toggle state
+  gl:      null,   // WebGL2 context
+  prog:    null,   // shader program
+  videoTex: null,  // texture unit 0 — video frame
+  lutTex:   null,  // texture unit 1 — 3D LUT
+  rafId:   null,   // requestAnimationFrame handle
+};
+
+// Parse a .cube file into { size, data: Float32Array }
+function parseCube(text) {
+  const lines  = text.split('\n');
+  let size     = 0;
+  const values = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    if (line.startsWith('LUT_3D_SIZE')) { size = parseInt(line.split(/\s+/)[1]); continue; }
+    if (line.startsWith('DOMAIN_') || line.startsWith('TITLE') || line.startsWith('LUT_1D')) continue;
+    const parts = line.split(/[\s,]+/);
+    if (parts.length >= 3) {
+      const r = parseFloat(parts[0]), g = parseFloat(parts[1]), b = parseFloat(parts[2]);
+      if (!isNaN(r) && !isNaN(g) && !isNaN(b)) values.push(r, g, b);
+    }
+  }
+  return { size, data: new Float32Array(values) };
+}
+
+// Initialise WebGL2 context + shaders on the canvas (once)
+function initLUTGL() {
+  const canvas = document.getElementById('lut-canvas');
+  const gl = canvas.getContext('webgl2');
+  if (!gl) { console.warn('WebGL2 not available — LUT preview disabled'); return false; }
+
+  const vs = gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vs, `#version 300 es
+    in vec2 aPos;
+    out vec2 vUV;
+    void main() {
+      vUV = vec2(aPos.x * 0.5 + 0.5, 0.5 - aPos.y * 0.5);
+      gl_Position = vec4(aPos, 0.0, 1.0);
+    }
+  `);
+  gl.compileShader(vs);
+
+  const fs = gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fs, `#version 300 es
+    precision highp float;
+    in vec2 vUV;
+    uniform sampler2D    uVideo;
+    uniform highp sampler3D uLUT;
+    uniform float        uLutSize;
+    out vec4 fragColor;
+    void main() {
+      vec4  col    = texture(uVideo, vUV);
+      float scale  = (uLutSize - 1.0) / uLutSize;
+      float offset = 0.5 / uLutSize;
+      vec3  coord  = col.rgb * scale + offset;
+      fragColor = vec4(texture(uLUT, coord).rgb, col.a);
+    }
+  `);
+  gl.compileShader(fs);
+
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    console.error('LUT shader link error:', gl.getProgramInfoLog(prog));
+    return false;
+  }
+  gl.useProgram(prog);
+
+  // Full-screen quad
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  const aPos = gl.getAttribLocation(prog, 'aPos');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+  // Video texture (unit 0)
+  const videoTex = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, videoTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.uniform1i(gl.getUniformLocation(prog, 'uVideo'), 0);
+  gl.uniform1i(gl.getUniformLocation(prog, 'uLUT'),   1);
+
+  lut.gl       = gl;
+  lut.prog     = prog;
+  lut.videoTex = videoTex;
+  return true;
+}
+
+// Upload parsed LUT data as a 3D texture (unit 1)
+function uploadLUTTexture() {
+  const { gl, prog, size, data } = lut;
+  if (!gl || !data) return;
+  if (lut.lutTex) gl.deleteTexture(lut.lutTex);
+  const tex = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_3D, tex);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+  gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGB32F, size, size, size, 0, gl.RGB, gl.FLOAT, data);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uLutSize'), size);
+  lut.lutTex = tex;
+}
+
+// Render one frame: copy video → canvas through LUT
+function renderLUTFrame() {
+  const { gl, videoTex } = lut;
+  const vid = document.getElementById('detail-video');
+  if (!gl || !vid || vid.readyState < 2) return;
+
+  const canvas = document.getElementById('lut-canvas');
+  if (canvas.width !== vid.videoWidth || canvas.height !== vid.videoHeight) {
+    canvas.width  = vid.videoWidth  || 640;
+    canvas.height = vid.videoHeight || 360;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  }
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, videoTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, vid);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// rAF loop — runs while LUT is on and video is playing
+function startLUTLoop() {
+  function loop() {
+    renderLUTFrame();
+    lut.rafId = requestAnimationFrame(loop);
+  }
+  if (lut.rafId) cancelAnimationFrame(lut.rafId);
+  lut.rafId = requestAnimationFrame(loop);
+}
+
+function stopLUTLoop() {
+  if (lut.rafId) { cancelAnimationFrame(lut.rafId); lut.rafId = null; }
+}
+
+// Show canvas (LUT on) or video (LUT off)
+function applyLUTState() {
+  const vid    = document.getElementById('detail-video');
+  const canvas = document.getElementById('lut-canvas');
+  const btn    = document.getElementById('vc-lut');
+  const on     = lut.enabled && lut.data;
+
+  if (on) {
+    if (!lut.gl && !initLUTGL()) { lut.enabled = false; return; }
+    uploadLUTTexture();
+    renderLUTFrame();          // paint first frame immediately
+    startLUTLoop();
+    vid.style.display    = 'none';
+    canvas.style.display = 'block';
+    btn.classList.add('active');
+  } else {
+    stopLUTLoop();
+    vid.style.display    = 'block';
+    canvas.style.display = 'none';
+    btn.classList.remove('active');
+  }
+}
+
+// Load a LUT from disk (called on startup and after picking a file)
+async function loadLUT(filePath) {
+  if (!filePath) return;
+  const text = await window.organizer.readLut(filePath);
+  if (!text) { toast('Could not read LUT file'); return; }
+  const parsed = parseCube(text);
+  if (!parsed.size || !parsed.data.length) { toast('Invalid .cube file'); return; }
+  lut.path = filePath;
+  lut.size = parsed.size;
+  lut.data = parsed.data;
+  lut.lutTex = null; // force re-upload next time
+  updateLUTSettingsUI();
+}
+
+function updateLUTSettingsUI() {
+  const nameEl = document.getElementById('settings-lut-name');
+  if (nameEl) {
+    nameEl.textContent = lut.path
+      ? lut.path.split('/').pop()
+      : 'No LUT loaded';
+    nameEl.title = lut.path || '';
+  }
+}
+
+// ── LUT button in video controls ─────────────────────────────────────────────
+document.getElementById('vc-lut').addEventListener('click', () => {
+  if (!lut.data) {
+    toast('No LUT loaded — choose one in ⚙ Settings');
+    return;
+  }
+  lut.enabled = !lut.enabled;
+  applyLUTState();
+});
+
+// ── Settings: LUT picker & clear ─────────────────────────────────────────────
+document.getElementById('btn-select-lut').addEventListener('click', async () => {
+  const filePath = await window.organizer.selectLut();
+  if (!filePath) return;
+  await loadLUT(filePath);
+  toast('LUT loaded: ' + filePath.split('/').pop());
+});
+
+document.getElementById('btn-clear-lut').addEventListener('click', async () => {
+  await window.organizer.clearLut();
+  lut.path    = null;
+  lut.size    = 0;
+  lut.data    = null;
+  lut.enabled = false;
+  applyLUTState();
+  updateLUTSettingsUI();
+  toast('LUT cleared');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI Analysis
+// ═══════════════════════════════════════════════════════════════════════════
+function updateAnalysisDisplay(clip) {
+  const el = document.getElementById('analysis-display');
+  const a  = clip && clip.analysis;
+  if (!a) {
+    el.innerHTML = '<div class="analysis-empty">Not yet analyzed.</div>';
+    return;
+  }
+
+  const pills = [
+    ...(a.subjects || []).map(s => `<span class="analysis-pill">👤 ${s}</span>`),
+    ...(a.suggestedTags || []).map(t => `<span class="analysis-pill">🏷 ${t}</span>`),
+    a.mood    ? `<span class="analysis-pill">🎭 ${a.mood}</span>` : '',
+    a.setting ? `<span class="analysis-pill">📍 ${a.setting}</span>` : '',
+  ].filter(Boolean).join('');
+
+  el.innerHTML = `
+    <div class="analysis-box">
+      <div class="analysis-desc">${a.description || ''}</div>
+      ${pills ? `<div class="analysis-meta">${pills}</div>` : ''}
+    </div>
+    ${a.analyzedAt ? `<div class="analysis-timestamp">Analyzed ${new Date(a.analyzedAt).toLocaleString()}</div>` : ''}
+  `;
+}
+
+function fmtDurLong(s) {
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}
+
+async function analyzeCurrentClip() {
+  const clip = state.filteredClips[state.selectedIndex];
+  if (!clip) return;
+  if (!settings.apiKey) { openSettings(); toast('Enter your Anthropic API key first'); return; }
+
+  // Warn on long clips (>2 min) — frame extraction can be slow for large files
+  if ((clip.duration || 0) > 120) {
+    const ok = confirm(
+      `This clip is ${fmtDurLong(clip.duration)} long.\n\n` +
+      `Analyzing very long clips can take 10–30 seconds because ffmpeg has to seek deep into the file. ` +
+      `(API cost is the same — we always sample 3 frames regardless of length.)\n\n` +
+      `Analyze anyway?`
+    );
+    if (!ok) return;
+  }
+
+  const btn = document.getElementById('btn-analyze-clip');
+  btn.classList.add('loading');
+  btn.textContent = '⏳ Analyzing…';
+
+  try {
+    const result = await window.organizer.analyzeClip(clip.relativePath);
+    if (result.error) {
+      toast('Error: ' + result.error);
+    } else {
+      clip.analysis = result.analysis;
+      updateAnalysisDisplay(clip);
+      toast('✨ Analysis complete');
+    }
+  } finally {
+    btn.classList.remove('loading');
+    btn.textContent = '✨ Analyze this clip';
+  }
+}
+
+async function analyzeAll() {
+  if (!settings.apiKey) { openSettings(); toast('Enter your Anthropic API key first'); return; }
+
+  const targets = state.filteredClips.filter(c => !c.analysis);
+  if (!targets.length) { toast('All visible clips already analyzed'); return; }
+
+  // Warn if there are long clips in the batch
+  const longClips = targets.filter(c => (c.duration || 0) > 120);
+  if (longClips.length > 0) {
+    const totalDur = targets.reduce((s, c) => s + (c.duration || 0), 0);
+    const ok = confirm(
+      `Analyzing ${targets.length} clip${targets.length !== 1 ? 's' : ''} ` +
+      `(${longClips.length} over 2 minutes, total footage: ${fmtDurLong(totalDur)}).\n\n` +
+      `Long clips take more time to process. This batch may run for several minutes.\n\n` +
+      `Continue?`
+    );
+    if (!ok) return;
+  }
+
+  document.getElementById('analysis-overlay').classList.remove('hidden');
+  document.getElementById('analysis-progress-label').textContent = `0 / ${targets.length} clips`;
+  document.getElementById('analysis-progress-bar').style.width = '0%';
+  document.getElementById('analysis-progress-current').textContent = '';
+
+  window.organizer.analyzeBatch(targets.map(c => c.relativePath));
+}
+
+window.organizer.onAnalysisProgress(data => {
+  const pct = data.total ? (data.done / data.total * 100) : 0;
+  document.getElementById('analysis-progress-bar').style.width = pct + '%';
+  document.getElementById('analysis-progress-label').textContent = `${data.done} / ${data.total} clips`;
+  document.getElementById('analysis-progress-current').textContent = data.current || '';
+});
+
+window.organizer.onAnalysisResult(data => {
+  const clip = state.clips.find(c => c.relativePath === data.relativePath);
+  if (clip) {
+    clip.analysis = data.analysis;
+    const current = state.filteredClips[state.selectedIndex];
+    if (current && current.relativePath === data.relativePath) {
+      updateAnalysisDisplay(clip);
+    }
+  }
+});
+
+window.organizer.onAnalysisComplete(data => {
+  document.getElementById('analysis-overlay').classList.add('hidden');
+  toast(`✨ ${data.done} clip${data.done !== 1 ? 's' : ''} analyzed`);
+});
+
+document.getElementById('btn-analyze-clip').addEventListener('click', analyzeCurrentClip);
+document.getElementById('btn-analyze-all').addEventListener('click', analyzeAll);
+document.getElementById('btn-cancel-analysis').addEventListener('click', async () => {
+  await window.organizer.cancelAnalysis();
+  document.getElementById('analysis-overlay').classList.add('hidden');
+  toast('Analysis cancelled');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Init
+// ═══════════════════════════════════════════════════════════════════════════
+boot();
+</script>
+</body>
+</html>

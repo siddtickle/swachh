@@ -1,0 +1,36 @@
+{
+  "name": "swachh",
+  "version": "1.0.0",
+  "description": "Swachh — browse, tag, and cull any video project",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "prebuild": "node scripts/copy-ffmpeg.js",
+    "build": "electron-builder build --mac"
+  },
+  "build": {
+    "appId": "com.sid.swachh",
+    "productName": "swachh",
+    "mac": {
+      "target": [{ "target": "dir", "arch": ["arm64"] }],
+      "category": "public.app-category.photography"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "vendor/ffmpeg",  "to": "bin/ffmpeg" },
+      { "from": "vendor/ffprobe", "to": "bin/ffprobe" }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^29.4.6",
+    "electron-builder": "^24.13.3"
+  }
+}
