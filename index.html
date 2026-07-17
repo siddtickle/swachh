@@ -169,12 +169,6 @@ select.toolbar-select:hover { border-color: var(--border2); color: var(--text); 
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 4px; padding: 8px 12px 12px;
 }
-.subfolder-label {
-  grid-column: 1 / -1;
-  font-size: 10px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .06em; color: var(--text3);
-  padding: 6px 2px 2px;
-}
 
 /* ── Clip card ─────────────────────────────────────────────────────────────── */
 .clip-card {
@@ -184,9 +178,16 @@ select.toolbar-select:hover { border-color: var(--border2); color: var(--text); 
 }
 .clip-card:hover { border-color: var(--border2); }
 .clip-card.selected { border-color: var(--accent); }
+.clip-card.multi-selected { outline: 3px solid var(--accent); outline-offset: -3px; }
+.clip-card.multi-selected .thumb-wrap::after {
+  content: ''; position: absolute; inset: 0;
+  background: rgba(74,158,255,.28); pointer-events: none;
+}
 .clip-card.marked-delete { border-color: var(--red); }
 .clip-card.marked-delete .thumb-wrap { opacity: .45; }
 .clip-card.starred .star-badge { opacity: 1; }
+.clip-card:hover .star-badge { opacity: .55; }
+.star-badge:hover { opacity: 1 !important; transform: scale(1.2); }
 
 .thumb-wrap {
   width: 100%; aspect-ratio: 16/9; overflow: hidden; position: relative;
@@ -195,6 +196,10 @@ select.toolbar-select:hover { border-color: var(--border2); color: var(--text); 
 .thumb-wrap img {
   width: 100%; height: 100%; object-fit: cover;
   display: block; transition: opacity .2s;
+}
+.thumb-scrub-video {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; pointer-events: none; background: #000;
 }
 .thumb-wrap .no-thumb {
   width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
@@ -222,9 +227,11 @@ select.toolbar-select:hover { border-color: var(--border2); color: var(--text); 
   font-size: 12px; border-bottom-left-radius: var(--radius);
 }
 .star-badge {
-  position: absolute; top: 4px; right: 4px;
-  font-size: 12px; opacity: 0;
+  position: absolute; top: 0; right: 0;
+  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; opacity: 0; cursor: pointer;
   text-shadow: 0 1px 3px rgba(0,0,0,.8);
+  transition: opacity .1s, transform .1s;
 }
 
 .clip-info {
@@ -362,6 +369,27 @@ select.toolbar-select:hover { border-color: var(--border2); color: var(--text); 
   font-size: 12px; font-weight: 600; transition: all .1s;
 }
 .btn-add-tag:hover { background: var(--accent); color: white; }
+
+/* Bulk selection bar */
+#bulk-bar {
+  position: sticky; bottom: 0; z-index: 5;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; margin-top: 4px;
+  background: var(--surf1); border-top: 1px solid var(--border2);
+  box-shadow: 0 -4px 16px rgba(0,0,0,.25);
+}
+#bulk-bar.hidden { display: none; }
+#bulk-count {
+  font-size: 12px; font-weight: 600; color: var(--text2);
+  white-space: nowrap; flex-shrink: 0;
+}
+.bulk-tag-chips {
+  display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto;
+  flex: 1; min-width: 0;
+}
+.bulk-tag-chips .preset-tag { flex-shrink: 0; }
+#bulk-tag-input { flex: 0 0 200px; }
+#bulk-clear { flex-shrink: 0; }
 
 /* Notes */
 .notes-area {
@@ -616,6 +644,9 @@ kbd {
     <button class="btn-icon" id="btn-trash-review" title="Review clips marked for deletion">
       🗑 <span id="trash-count" class="badge-count hidden">0</span>
     </button>
+    <button class="btn-icon" id="btn-reveal-starred" title="Reveal all starred clips in Finder, pre-selected">
+      📤 <span id="starred-count" class="badge-count hidden">0</span>
+    </button>
     <button class="btn-icon" id="btn-toggle-sidebar" title="Toggle filters (F)">☰</button>
     <button class="btn-icon" id="btn-settings" title="Settings (API key for AI analysis)">⚙</button>
   </div>
@@ -672,6 +703,10 @@ kbd {
         <div class="sidebar-title">Resolution</div>
         <div id="filter-res"></div>
       </div>
+      <div class="sidebar-section">
+        <div class="sidebar-title">Tags</div>
+        <div id="filter-tags"></div>
+      </div>
     </div>
 
     <!-- Grid -->
@@ -681,6 +716,12 @@ kbd {
         <div class="empty-state-text">No clips loaded</div>
       </div>
       <div id="clip-grid-container"></div>
+      <div id="bulk-bar" class="hidden">
+        <span id="bulk-count"></span>
+        <div id="bulk-tag-chips" class="bulk-tag-chips"></div>
+        <input class="tag-input" id="bulk-tag-input" type="text" placeholder="Add tag to selection…" maxlength="32">
+        <button class="btn-icon" id="bulk-clear" title="Clear selection">✕ Clear</button>
+      </div>
     </div>
 
     <!-- Detail panel -->
@@ -790,6 +831,18 @@ kbd {
     </div>
 
     <div style="border-top:1px solid var(--border);padding-top:14px;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text3)">Preset Tags</div>
+      <div class="preset-tags" id="settings-preset-tags"></div>
+      <div class="tag-input-wrap" style="margin-top:0">
+        <input class="tag-input" id="settings-preset-tag-input" type="text" placeholder="Add preset tag…" maxlength="32">
+        <button class="btn-add-tag" id="btn-settings-add-preset">+ Add</button>
+      </div>
+      <div style="font-size:10px;color:var(--text3);line-height:1.5">
+        One-click chips offered when tagging clips in this project. Click a chip below to remove it. Saved with this project folder, so different projects can have different presets.
+      </div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);padding-top:14px;display:flex;flex-direction:column;gap:8px">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text3)">Preview LUT</div>
       <div class="settings-lut-row">
         <span class="settings-lut-name" id="settings-lut-name">No LUT loaded</span>
@@ -858,7 +911,9 @@ kbd {
 const state = {
   clips: [],           // all clips merged with user data
   filteredClips: [],   // after filters applied
-  selectedIndex: -1,   // index into filteredClips
+  selectedIndex: -1,   // index into filteredClips (single-clip detail view)
+  selectedPaths: new Set(), // relativePaths of multi-selected clips (Finder-style grid selection)
+  lastClickedIndex: -1,     // anchor for shift-click range select
   groupBy: 'day',      // 'day' | 'camera' | 'folder' | 'none'
   sortBy: 'date',
   search: '',
@@ -867,13 +922,36 @@ const state = {
     days:     new Set(),
     focal:    new Set(),
     res:      new Set(),
+    tags:     new Set(),
     starred:  false,
     blank:    false,
     untagged: false,
   },
   sidebarOpen: true,
   pendingDeleteList: [], // for the trash review modal
+  presetTags: [],        // per-project one-click tag chips, editable in Settings
 };
+
+// All tags ever used on any clip, plus the project's preset tags — so a custom
+// tag typed on one clip becomes a one-click chip on every other clip from then on.
+function getKnownTags() {
+  const counts = {};
+  for (const c of state.clips) {
+    for (const t of (c.tags || [])) counts[t] = (counts[t] || 0) + 1;
+  }
+  const custom = Object.keys(counts)
+    .filter(t => !state.presetTags.includes(t))
+    .sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
+  return [...state.presetTags, ...custom];
+}
+
+function countByTag() {
+  const map = {};
+  for (const c of state.clips) {
+    for (const t of (c.tags || [])) map[t] = (map[t] || 0) + 1;
+  }
+  return map;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Utility
@@ -992,7 +1070,8 @@ function listenExtraction(onComplete) {
 
 async function loadAndShowApp() {
   await loadSettings();
-  state.clips = await window.organizer.getClips();
+  state.clips      = await window.organizer.getClips();
+  state.presetTags = await window.organizer.getPresetTags();
   buildSidebarFilters();
   applyFilters();
 
@@ -1006,6 +1085,7 @@ async function loadAndShowApp() {
 
   renderGrid();
   updateTrashCount();
+  updateStarredCount();
   showApp();
 }
 
@@ -1033,6 +1113,15 @@ function buildSidebarFilters() {
 
   buildCheckGroup('filter-res', countBy(c => fmt_res(c.width, c.height)), (v) => state.filters.res.has(v), (v,checked) => {
     if (checked) state.filters.res.add(v); else state.filters.res.delete(v);
+    applyFilters(); renderGrid();
+  });
+
+  buildTagFilterGroup();
+}
+
+function buildTagFilterGroup() {
+  buildCheckGroup('filter-tags', countByTag(), (v) => state.filters.tags.has(v), (v,checked) => {
+    if (checked) state.filters.tags.add(v); else state.filters.tags.delete(v);
     applyFilters(); renderGrid();
   });
 }
@@ -1095,6 +1184,7 @@ function applyFilters() {
   if (state.filters.days.size)    clips = clips.filter(c => state.filters.days.has(c.day));
   if (state.filters.focal.size)   clips = clips.filter(c => state.filters.focal.has(c.focalLength));
   if (state.filters.res.size)     clips = clips.filter(c => state.filters.res.has(fmt_res(c.width, c.height)));
+  if (state.filters.tags.size)    clips = clips.filter(c => (c.tags || []).some(t => state.filters.tags.has(t)));
 
   // Toggle filters
   if (state.filters.starred)  clips = clips.filter(c => c.starred);
@@ -1132,7 +1222,7 @@ function renderGrid() {
   const groups = groupClips(state.filteredClips);
   const frag   = document.createDocumentFragment();
 
-  for (const { label, clips: groupClips, subgroups } of groups) {
+  for (const { label, clips: groupClips } of groups) {
     const groupEl = document.createElement('div');
     groupEl.className = 'day-group';
 
@@ -1144,23 +1234,7 @@ function renderGrid() {
       <span class="day-meta">${groupClips.length} clip${groupClips.length !== 1 ? 's' : ''} · ${fmt_dur(totalDur)}</span>
     `;
     groupEl.appendChild(header);
-
-    if (subgroups) {
-      // Render with subfolder sub-headings
-      for (const [subLabel, subClips] of Object.entries(subgroups)) {
-        if (subLabel) {
-          const subHead = document.createElement('div');
-          subHead.className = 'subfolder-label';
-          subHead.style.padding = '6px 16px 2px';
-          subHead.textContent = '📁 ' + subLabel;
-          groupEl.appendChild(subHead);
-        }
-        const grid = makeGrid(subClips);
-        groupEl.appendChild(grid);
-      }
-    } else {
-      groupEl.appendChild(makeGrid(groupClips));
-    }
+    groupEl.appendChild(makeGrid(groupClips));
 
     frag.appendChild(groupEl);
   }
@@ -1195,20 +1269,7 @@ function groupClips(clips) {
 
   return Array.from(map.entries()).map(([key, groupClips]) => {
     const label = state.groupBy === 'day' ? day_label(key) : key;
-
-    // For day grouping, also sub-group by subfolder if there are multiple
-    let subgroups = null;
-    if (state.groupBy === 'day') {
-      const folders = [...new Set(groupClips.map(c => c.subfolder || ''))];
-      if (folders.length > 1) {
-        subgroups = {};
-        for (const f of folders) {
-          subgroups[f] = groupClips.filter(c => (c.subfolder || '') === f);
-        }
-      }
-    }
-
-    return { label, clips: groupClips, subgroups };
+    return { label, clips: groupClips };
   });
 }
 
@@ -1219,6 +1280,7 @@ function makeCard(clip) {
   card.className = [
     'clip-card',
     isSelected ? 'selected' : '',
+    state.selectedPaths.has(clip.relativePath) ? 'multi-selected' : '',
     clip.markedDelete ? 'marked-delete' : '',
     clip.starred ? 'starred' : '',
   ].filter(Boolean).join(' ');
@@ -1241,7 +1303,7 @@ function makeCard(clip) {
       ${clip.width ? `<span class="res-badge">${fmt_res(clip.width, clip.height)}</span>` : ''}
       ${clip.isBlankCandidate ? '<span class="blank-badge">BLANK?</span>' : ''}
       ${clip.markedDelete ? '<span class="delete-badge">🗑</span>' : ''}
-      <span class="star-badge">⭐</span>
+      <span class="star-badge" title="${clip.starred ? 'Unstar' : 'Star'} this clip">⭐</span>
     </div>
     <div class="clip-info">
       <div class="clip-filename">${clip.filename}</div>
@@ -1253,7 +1315,96 @@ function makeCard(clip) {
     </div>
   `;
 
-  card.addEventListener('click', () => selectClip(idx));
+  card.querySelector('.star-badge').addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleStar(clip);
+  });
+
+  // Hover-scrub: drag the mouse across the thumbnail to preview frames from
+  // across the clip, using a muted <video> layered over the static thumbnail.
+  const codec = (clip.codec || '').toLowerCase();
+  const scrubUnsupported = clip.cameraType === 'iphone' ||
+    codec === 'prores' || codec === 'prores_ks' || codec === 'dnxhd';
+  if (!scrubUnsupported && clip.duration) {
+    const thumbWrap = card.querySelector('.thumb-wrap');
+    let scrubVideo   = null;
+    let hoverTimer    = null;
+    let rafPending    = false;
+    let pendingFraction = 0;
+
+    const startScrub = () => {
+      scrubVideo = document.createElement('video');
+      scrubVideo.className = 'thumb-scrub-video';
+      scrubVideo.muted     = true;
+      scrubVideo.playsInline = true;
+      scrubVideo.preload   = 'metadata';
+      scrubVideo.src       = window.organizer.videoUrl(clip.relativePath);
+      thumbWrap.insertBefore(scrubVideo, thumbWrap.children[1] || null);
+    };
+
+    const stopScrub = () => {
+      clearTimeout(hoverTimer);
+      hoverTimer = null;
+      if (scrubVideo) {
+        scrubVideo.pause();
+        scrubVideo.removeAttribute('src');
+        scrubVideo.load();
+        scrubVideo.remove();
+        scrubVideo = null;
+      }
+    };
+
+    thumbWrap.addEventListener('mouseenter', () => {
+      hoverTimer = setTimeout(startScrub, 120);
+    });
+    thumbWrap.addEventListener('mouseleave', stopScrub);
+    thumbWrap.addEventListener('mousemove', (e) => {
+      if (!scrubVideo) return;
+      const rect = thumbWrap.getBoundingClientRect();
+      pendingFraction = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+      if (!rafPending) {
+        rafPending = true;
+        requestAnimationFrame(() => {
+          rafPending = false;
+          if (scrubVideo) scrubVideo.currentTime = pendingFraction * clip.duration;
+        });
+      }
+    });
+  }
+
+  card.addEventListener('click', (e) => {
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      toggleMultiSelect(idx);
+    } else if (e.shiftKey) {
+      e.preventDefault();
+      rangeSelectTo(idx);
+    } else {
+      state.selectedPaths.clear();
+      state.lastClickedIndex = idx;
+      selectClip(idx);
+      renderBulkBar();
+    }
+  });
+
+  // Native OS drag-out: drag straight onto an external app (e.g. an NLE
+  // timeline), like dragging files out of Finder. Dragging a card that's part
+  // of the current multi-selection drags the whole selection, matching Finder.
+  // Only armed on a plain mousedown — Cmd/Ctrl/Shift are exclusively for
+  // selection in this grid and should never be able to kick off a (blocking,
+  // OS-level) drag session.
+  card.draggable = false;
+  card.addEventListener('mousedown', (e) => {
+    card.draggable = e.button === 0 && !(e.metaKey || e.ctrlKey || e.shiftKey);
+  });
+  card.addEventListener('dragstart', (e) => {
+    e.preventDefault();
+    const paths = (state.selectedPaths.has(clip.relativePath) && state.selectedPaths.size > 1)
+      ? [...state.selectedPaths]
+      : [clip.relativePath];
+    window.organizer.startDrag(paths);
+  });
+
   return card;
 }
 
@@ -1325,6 +1476,8 @@ function selectClip(idx) {
     };
     vid.src = window.organizer.videoUrl(clip.relativePath);
     vid.load();
+    // load() resets playbackRate to 1 — re-apply whatever speed is selected
+    vid.playbackRate = parseFloat(document.getElementById('vc-speed').value);
     vid.play().catch(() => {});
   }
 
@@ -1396,8 +1549,6 @@ function renderMeta(id, rows) {
 }
 
 function renderDetailTags(clip) {
-  const PRESETS = ['⛩ shrine','🌸 blossoms','🏙 street','🍜 food','🚅 train','🏔 nature',
-                   '👥 people','🌙 night','🏨 hotel','🛍 shopping','🎭 festival','📸 b-roll','⭐ hero'];
   const activeTags = clip.tags || [];
 
   // Active tags (click to remove)
@@ -1409,9 +1560,9 @@ function renderDetailTags(clip) {
     el.addEventListener('click', () => removeTag(clip, el.dataset.tag));
   });
 
-  // Preset tags
+  // Known tags — presets plus every custom tag used anywhere in the project
   const presetRow = document.getElementById('preset-tags-row');
-  presetRow.innerHTML = PRESETS.map(p => `
+  presetRow.innerHTML = getKnownTags().map(p => `
     <span class="preset-tag ${activeTags.includes(p) ? 'applied' : ''}" data-tag="${p}">${p}</span>
   `).join('');
   presetRow.querySelectorAll('.preset-tag').forEach(el => {
@@ -1429,6 +1580,7 @@ async function addTag(clip, tag) {
   await window.organizer.updateClip(clip.relativePath, { tags });
   renderDetailTags(clip);
   renderCardTags(clip);
+  buildTagFilterGroup();
   document.getElementById('tag-input').value = '';
 }
 
@@ -1437,6 +1589,7 @@ async function removeTag(clip, tag) {
   await window.organizer.updateClip(clip.relativePath, { tags: clip.tags });
   renderDetailTags(clip);
   renderCardTags(clip);
+  buildTagFilterGroup();
 }
 
 function renderCardTags(clip) {
@@ -1449,7 +1602,7 @@ function renderCardTags(clip) {
   }
 }
 
-function closeDetail() {
+function resetDetailPanel() {
   state.selectedIndex = -1;
   document.getElementById('detail-panel').classList.remove('open');
   const vid = document.getElementById('detail-video');
@@ -1461,7 +1614,111 @@ function closeDetail() {
   const msgEl = document.getElementById('video-msg');
   msgEl.innerHTML = '';
   msgEl.classList.add('hidden');
+}
+
+function closeDetail() {
+  resetDetailPanel();
   renderGrid();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Multi-select & bulk tagging (Finder-style grid selection)
+// ═══════════════════════════════════════════════════════════════════════════
+function toggleMultiSelect(idx) {
+  const clip = state.filteredClips[idx];
+  if (!clip) return;
+  if (state.selectedPaths.has(clip.relativePath)) state.selectedPaths.delete(clip.relativePath);
+  else state.selectedPaths.add(clip.relativePath);
+  state.lastClickedIndex = idx;
+  // A single-clip detail view and a multi-selection are mutually exclusive —
+  // otherwise it's ambiguous whether tagging via the detail panel or the bulk
+  // bar is "the" action, and tags silently only land on the one open clip.
+  if (state.selectedPaths.size && state.selectedIndex !== -1) resetDetailPanel();
+  renderGrid();
+  renderBulkBar();
+}
+
+function rangeSelectTo(idx) {
+  const anchor = state.lastClickedIndex >= 0 ? state.lastClickedIndex : idx;
+  const [from, to] = [Math.min(anchor, idx), Math.max(anchor, idx)];
+  for (let i = from; i <= to; i++) {
+    const c = state.filteredClips[i];
+    if (c) state.selectedPaths.add(c.relativePath);
+  }
+  state.lastClickedIndex = idx;
+  if (state.selectedPaths.size && state.selectedIndex !== -1) resetDetailPanel();
+  renderGrid();
+  renderBulkBar();
+}
+
+function clearMultiSelect() {
+  if (!state.selectedPaths.size) return;
+  state.selectedPaths.clear();
+  renderGrid();
+  renderBulkBar();
+}
+
+function selectAllVisible() {
+  state.selectedPaths = new Set(state.filteredClips.map(c => c.relativePath));
+  renderGrid();
+  renderBulkBar();
+}
+
+function renderBulkBar() {
+  const bar = document.getElementById('bulk-bar');
+  const n   = state.selectedPaths.size;
+  if (!n) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  document.getElementById('bulk-count').textContent = `${n} clip${n !== 1 ? 's' : ''} selected`;
+
+  const targets = state.clips.filter(c => state.selectedPaths.has(c.relativePath));
+  const chips = document.getElementById('bulk-tag-chips');
+  chips.innerHTML = getKnownTags().map(t => {
+    const allHave = targets.every(c => (c.tags || []).includes(t));
+    return `<span class="preset-tag ${allHave ? 'applied' : ''}" data-tag="${t}" title="${allHave ? 'Click to remove from selection' : 'Click to apply to selection'}">${t}</span>`;
+  }).join('');
+  chips.querySelectorAll('.preset-tag').forEach(el => {
+    el.addEventListener('click', () => bulkToggleTag(el.dataset.tag));
+  });
+}
+
+// Known-tag chips in the bulk bar toggle: applied to every selected clip already
+// → remove from all; otherwise → apply to whichever selected clips are missing it.
+async function bulkToggleTag(tag) {
+  tag = tag.trim();
+  if (!tag || !state.selectedPaths.size) return;
+  const targets    = state.clips.filter(c => state.selectedPaths.has(c.relativePath));
+  const allHave    = targets.every(c => (c.tags || []).includes(tag));
+  const shouldHave = !allHave; // all have it already -> remove from all; otherwise -> add to whoever's missing it
+  await Promise.all(targets.map(async c => {
+    const has = (c.tags || []).includes(tag);
+    if (has === shouldHave) return; // already in the desired state
+    c.tags = shouldHave ? [...(c.tags || []), tag] : c.tags.filter(t => t !== tag);
+    await window.organizer.updateClip(c.relativePath, { tags: c.tags });
+  }));
+  renderGrid();
+  buildTagFilterGroup();
+  renderBulkBar();
+  toast(allHave
+    ? `Removed "${tag}" from ${targets.length} clip${targets.length !== 1 ? 's' : ''}`
+    : `🏷 Tagged ${targets.length} clip${targets.length !== 1 ? 's' : ''} "${tag}"`);
+}
+
+// Free-text input in the bulk bar: always additive (typing a tag to remove it
+// in bulk isn't an obvious gesture — use the chip toggle above for that).
+async function bulkAddTag(tag) {
+  tag = tag.trim();
+  if (!tag || !state.selectedPaths.size) return;
+  const targets = state.clips.filter(c => state.selectedPaths.has(c.relativePath));
+  await Promise.all(targets.map(async c => {
+    if ((c.tags || []).includes(tag)) return;
+    c.tags = [...new Set([...(c.tags || []), tag])];
+    await window.organizer.updateClip(c.relativePath, { tags: c.tags });
+  }));
+  renderGrid();
+  buildTagFilterGroup();
+  renderBulkBar();
+  toast(`🏷 Tagged ${targets.length} clip${targets.length !== 1 ? 's' : ''} "${tag}"`);
 }
 
 function debounce(fn, ms) {
@@ -1474,10 +1731,13 @@ function debounce(fn, ms) {
 async function toggleStar(clip) {
   clip.starred = !clip.starred;
   await window.organizer.updateClip(clip.relativePath, { starred: clip.starred });
-  const btn = document.getElementById('btn-star');
-  btn.className   = `btn-action btn-star ${clip.starred ? 'starred' : ''}`;
-  btn.textContent = clip.starred ? '★ Starred' : '⭐ Star this clip';
+  if (state.filteredClips[state.selectedIndex] === clip) {
+    const btn = document.getElementById('btn-star');
+    btn.className   = `btn-action btn-star ${clip.starred ? 'starred' : ''}`;
+    btn.textContent = clip.starred ? '★ Starred' : '⭐ Star this clip';
+  }
   renderCardTags(clip);
+  updateStarredCount();
   toast(clip.starred ? '⭐ Starred' : 'Star removed');
 }
 
@@ -1497,6 +1757,21 @@ function updateTrashCount() {
   const badge = document.getElementById('trash-count');
   badge.textContent = n;
   badge.classList.toggle('hidden', n === 0);
+}
+
+function updateStarredCount() {
+  const n    = state.clips.filter(c => c.starred).length;
+  const badge = document.getElementById('starred-count');
+  badge.textContent = n;
+  badge.classList.toggle('hidden', n === 0);
+}
+
+async function revealStarredInFinder() {
+  const starred = state.clips.filter(c => c.starred);
+  if (!starred.length) { toast('No starred clips yet'); return; }
+  const result = await window.organizer.revealMultiple(starred.map(c => c.relativePath));
+  if (!result.ok) { toast('Could not reveal clips in Finder'); return; }
+  toast(`📤 Revealed ${result.revealed} clip${result.revealed !== 1 ? 's' : ''} in ${result.windows} Finder window${result.windows !== 1 ? 's' : ''}`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1545,9 +1820,12 @@ async function confirmTrash() {
   // Remove trashed from state.clips
   const trashed = new Set(result.trashed || []);
   state.clips   = state.clips.filter(c => !trashed.has(c.relativePath));
+  for (const rp of trashed) state.selectedPaths.delete(rp);
   applyFilters();
   renderGrid();
   updateTrashCount();
+  updateStarredCount();
+  renderBulkBar();
 
   document.getElementById('trash-modal').classList.add('hidden');
   toast(`🗑 ${result.trashed.length} clip${result.trashed.length !== 1 ? 's' : ''} moved to Trash`);
@@ -1674,6 +1952,18 @@ document.getElementById('vc-loop').addEventListener('click', () => {
   document.getElementById('vc-loop').style.color = vid.loop ? 'var(--accent)' : 'var(--text2)';
 });
 
+// Reveal starred clips in Finder
+document.getElementById('btn-reveal-starred').addEventListener('click', revealStarredInFinder);
+
+// Bulk selection bar
+document.getElementById('bulk-clear').addEventListener('click', clearMultiSelect);
+document.getElementById('bulk-tag-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    bulkAddTag(e.target.value);
+    e.target.value = '';
+  }
+});
+
 // Trash modal
 document.getElementById('btn-trash-review').addEventListener('click', openTrashModal);
 document.getElementById('btn-trash-cancel').addEventListener('click', () => {
@@ -1694,11 +1984,18 @@ document.addEventListener('keydown', e => {
     return;
   }
 
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+    e.preventDefault();
+    selectAllVisible();
+    return;
+  }
+
   const clip = state.filteredClips[state.selectedIndex];
 
   switch (e.key) {
     case 'Escape':
-      closeDetail();
+      if (state.selectedPaths.size) clearMultiSelect();
+      else closeDetail();
       break;
     case 'ArrowRight':
     case 'ArrowDown':
@@ -1760,6 +2057,7 @@ async function loadSettings() {
 function openSettings() {
   document.getElementById('settings-api-key').value = settings.apiKey || '';
   updateLUTSettingsUI();
+  renderSettingsPresetTags();
 
   // Populate usage grid
   const u = settings.usage || { inputTokens: 0, outputTokens: 0, clipsAnalyzed: 0 };
@@ -1781,6 +2079,31 @@ async function saveSettings() {
   toast('⚙ Settings saved');
 }
 
+function renderSettingsPresetTags() {
+  const wrap = document.getElementById('settings-preset-tags');
+  wrap.innerHTML = state.presetTags.length
+    ? state.presetTags.map(t => `<span class="tag-pill" data-tag="${t}">${t} <span class="tag-x"></span></span>`).join('')
+    : '<span style="font-size:11px;color:var(--text3)">No preset tags yet — add some below.</span>';
+  wrap.querySelectorAll('.tag-pill').forEach(el => {
+    el.addEventListener('click', () => removePresetTag(el.dataset.tag));
+  });
+}
+
+async function addPresetTag(tag) {
+  tag = tag.trim();
+  if (!tag || state.presetTags.includes(tag)) return;
+  state.presetTags = [...state.presetTags, tag];
+  await window.organizer.setPresetTags(state.presetTags);
+  renderSettingsPresetTags();
+  document.getElementById('settings-preset-tag-input').value = '';
+}
+
+async function removePresetTag(tag) {
+  state.presetTags = state.presetTags.filter(t => t !== tag);
+  await window.organizer.setPresetTags(state.presetTags);
+  renderSettingsPresetTags();
+}
+
 document.getElementById('btn-settings').addEventListener('click', openSettings);
 document.getElementById('btn-settings-cancel').addEventListener('click', () => {
   document.getElementById('settings-modal').classList.add('hidden');
@@ -1792,6 +2115,12 @@ document.getElementById('settings-modal').addEventListener('click', e => {
 document.getElementById('settings-api-key').addEventListener('keydown', e => {
   if (e.key === 'Enter') saveSettings();
   if (e.key === 'Escape') document.getElementById('settings-modal').classList.add('hidden');
+});
+document.getElementById('btn-settings-add-preset').addEventListener('click', () => {
+  addPresetTag(document.getElementById('settings-preset-tag-input').value);
+});
+document.getElementById('settings-preset-tag-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') addPresetTag(e.target.value);
 });
 document.getElementById('settings-api-link').addEventListener('click', e => {
   e.preventDefault();

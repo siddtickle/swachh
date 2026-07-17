@@ -2,7 +2,7 @@
 // swachh — Electron Main Process
 // ─────────────────────────────────────────────────────────────────────────────
 
-const { app, BrowserWindow, ipcMain, protocol, shell, net, nativeTheme, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, shell, net, nativeTheme, dialog, nativeImage } = require('electron');
 const path   = require('path');
 const fs     = require('fs');
 const os     = require('os');
@@ -11,6 +11,22 @@ const { promisify } = require('util');
 const { pathToFileURL } = require('url');
 
 const execFileAsync = promisify(cp.execFile);
+
+// A stray error from a background IPC handler (e.g. a stream lifecycle edge
+// case) shouldn't take down the whole app with a disruptive native crash
+// dialog — log it and keep going.
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
+
+const VIDEO_MIME_TYPES = {
+  '.mov':  'video/quicktime',
+  '.mp4':  'video/mp4',
+  '.mts':  'video/mp2t',
+  '.m2ts': 'video/mp2t',
+  '.avi':  'video/x-msvideo',
+  '.mkv':  'video/x-matroska',
+};
 
 // ── Enable hardware video decode (HEVC/H.265 on macOS via VideoToolbox) ───────
 // Must be called before app.whenReady()
@@ -41,11 +57,12 @@ function saveConfig(data) {
 
 // ── Derived paths from project folder ────────────────────────────────────────
 function getProjectPaths(projectFolder) {
-  const dataDir      = path.join(projectFolder, DATA_SUBDIR);
-  const thumbDir     = path.join(dataDir, 'thumbnails');
-  const clipsJson    = path.join(dataDir, 'clips.json');
-  const userDataJson = path.join(dataDir, 'user_data.json');
-  return { dataDir, thumbDir, clipsJson, userDataJson };
+  const dataDir        = path.join(projectFolder, DATA_SUBDIR);
+  const thumbDir       = path.join(dataDir, 'thumbnails');
+  const clipsJson      = path.join(dataDir, 'clips.json');
+  const userDataJson   = path.join(dataDir, 'user_data.json');
+  const presetTagsJson = path.join(dataDir, 'preset_tags.json');
+  return { dataDir, thumbDir, clipsJson, userDataJson, presetTagsJson };
 }
 
 // ── Find ffprobe / ffmpeg — bundled binary first, system fallback ─────────────
@@ -121,6 +138,19 @@ function loadUserData(projectFolder) {
 function saveUserData(projectFolder, data) {
   const { userDataJson } = getProjectPaths(projectFolder);
   fs.writeFileSync(userDataJson, JSON.stringify(data, null, 2));
+}
+
+function loadPresetTags(projectFolder) {
+  const { presetTagsJson } = getProjectPaths(projectFolder);
+  if (!fs.existsSync(presetTagsJson)) return [];
+  try { return JSON.parse(fs.readFileSync(presetTagsJson, 'utf8')); }
+  catch { return []; }
+}
+
+function savePresetTags(projectFolder, tags) {
+  const { dataDir, presetTagsJson } = getProjectPaths(projectFolder);
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(presetTagsJson, JSON.stringify(tags, null, 2));
 }
 
 function mergeWithUserData(clips, projectFolder) {
@@ -473,6 +503,18 @@ function setupIPC() {
     return { ok: true };
   });
 
+  // Preset tags — per-project, customizable one-click tag chips
+  ipcMain.handle('tags:get-presets', () => {
+    if (!PROJECT_FOLDER) return [];
+    return loadPresetTags(PROJECT_FOLDER);
+  });
+
+  ipcMain.handle('tags:set-presets', (_, tags) => {
+    if (!PROJECT_FOLDER) return { ok: false };
+    savePresetTags(PROJECT_FOLDER, tags);
+    return { ok: true };
+  });
+
   // Trash single clip
   ipcMain.handle('clip:trash', async (_, relativePath) => {
     if (!PROJECT_FOLDER) return { ok: false };
@@ -525,6 +567,52 @@ function setupIPC() {
   ipcMain.handle('clip:show-in-finder', (_, relativePath) => {
     if (!PROJECT_FOLDER) return;
     shell.showItemInFolder(path.join(PROJECT_FOLDER, relativePath));
+  });
+
+  // Reveal multiple clips in Finder, pre-selected. Finder can only browse/select
+  // within one folder at a time, so clips are grouped by parent directory and one
+  // Finder window is opened per group with that group's files selected.
+  ipcMain.handle('clips:reveal-multiple', async (_, relativePaths) => {
+    if (!PROJECT_FOLDER || !relativePaths.length) return { ok: false, revealed: 0, windows: 0 };
+    const escapeAppleScriptString = s => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const byDir = new Map();
+    for (const rp of relativePaths) {
+      const fp = path.join(PROJECT_FOLDER, rp);
+      if (!fs.existsSync(fp)) continue;
+      const dir = path.dirname(fp);
+      if (!byDir.has(dir)) byDir.set(dir, []);
+      byDir.get(dir).push(fp);
+    }
+    let revealed = 0;
+    for (const [, files] of byDir) {
+      const posixList = files.map(f => `POSIX file "${escapeAppleScriptString(f)}"`).join(', ');
+      const script = `tell application "Finder"\n  activate\n  select {${posixList}}\nend tell`;
+      await execFileAsync('osascript', ['-e', script]);
+      revealed += files.length;
+    }
+    return { ok: true, revealed, windows: byDir.size };
+  });
+
+  // Native OS drag-out: lets the renderer drag one or more selected clips
+  // straight onto an external app (e.g. an NLE timeline), like dragging files
+  // out of Finder. Must respond synchronously within the renderer's dragstart
+  // handler, so this uses ipcMain.on/webContents.startDrag rather than invoke.
+  const FALLBACK_DRAG_ICON = nativeImage.createFromDataURL(
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGOwsXGkKWIYtWDUglELRi0YtWDUglELRi0YtWDUglELhooFAD8J5B8metTSAAAAAElFTkSuQmCC'
+  );
+  ipcMain.on('clips:start-drag', (event, relativePaths) => {
+    if (!PROJECT_FOLDER || !relativePaths.length) return;
+    const files = relativePaths
+      .map(rp => path.join(PROJECT_FOLDER, rp))
+      .filter(fp => fs.existsSync(fp));
+    if (!files.length) return;
+
+    const { thumbDir } = getProjectPaths(PROJECT_FOLDER);
+    const thumbPath = path.join(thumbDir, thumbName(relativePaths[0]));
+    let icon = fs.existsSync(thumbPath) ? nativeImage.createFromPath(thumbPath) : FALLBACK_DRAG_ICON;
+    if (icon.isEmpty()) icon = FALLBACK_DRAG_ICON;
+
+    event.sender.startDrag({ files, icon });
   });
 
   // Re-scan existing folder (for after adding new clips)
@@ -716,8 +804,91 @@ app.whenReady().then(() => {
         return new Response(null, { status: 403 });
       if (!fs.existsSync(filepath))
         return new Response(null, { status: 404 });
-      // Forward Range header so <video> seeking works
-      return net.fetch(pathToFileURL(filepath).toString(), { headers: request.headers });
+
+      // net.fetch() against a file:// URL truncates the body to match a Range
+      // header but always reports status 200 with no Content-Range — Chromium's
+      // <video> element then can't tell it received a partial response, which
+      // breaks seeking/scrubbing. Handle Range requests manually instead.
+      const stat     = fs.statSync(filepath);
+      const fileSize = stat.size;
+      const mimeType = VIDEO_MIME_TYPES[path.extname(filepath).toLowerCase()] || 'video/mp4';
+      const range    = request.headers.get('range');
+      const match    = range && /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+
+      // Chromium aborts and re-issues these requests constantly during normal
+      // playback (seeking, scrubbing, closing the video element), so the stream
+      // must be torn down cleanly on abort. Node's Readable.toWeb() has a known
+      // double-close bug (its internal 'close' listener calls controller.close()
+      // even when the controller was already closed via 'end', throwing
+      // ERR_INVALID_STATE and crashing the whole app) — so the bridge to a Web
+      // ReadableStream is built by hand here, with a single-fire guard around
+      // every path (end / error / abort / consumer cancel) that can settle it.
+      const streamFor = (options) => {
+        const nodeStream = fs.createReadStream(filepath, options);
+        let settled = false;
+        let controller = null;
+        const settle = (err) => {
+          if (settled) return;
+          settled = true;
+          if (!nodeStream.destroyed) nodeStream.destroy();
+          if (!controller) return;
+          try { err ? controller.error(err) : controller.close(); } catch {}
+        };
+        request.signal.addEventListener('abort', () => settle());
+        return new ReadableStream({
+          start(c) {
+            controller = c;
+            nodeStream.on('data', (chunk) => {
+              try {
+                controller.enqueue(chunk);
+                if (controller.desiredSize !== null && controller.desiredSize <= 0) nodeStream.pause();
+              } catch {}
+            });
+            nodeStream.on('end', () => settle());
+            nodeStream.on('error', (err) => settle(err));
+          },
+          pull() { nodeStream.resume(); },
+          cancel() { settle(); },
+        });
+      };
+
+      if (match && (match[1] !== '' || match[2] !== '')) {
+        let start, end;
+        if (match[1] === '') {
+          // Suffix range, e.g. "bytes=-500" = last 500 bytes (used by some
+          // players to read a trailing moov atom on non-faststart MP4s).
+          const suffixLength = parseInt(match[2], 10);
+          start = Math.max(fileSize - suffixLength, 0);
+          end   = fileSize - 1;
+        } else {
+          start = parseInt(match[1], 10);
+          end   = match[2] !== '' ? Math.min(parseInt(match[2], 10), fileSize - 1) : fileSize - 1;
+        }
+        if (start >= fileSize || start > end) {
+          return new Response(null, {
+            status: 416,
+            headers: { 'Content-Range': `bytes */${fileSize}` },
+          });
+        }
+        return new Response(streamFor({ start, end }), {
+          status: 206,
+          headers: {
+            'Content-Range':  `bytes ${start}-${end}/${fileSize}`,
+            'Accept-Ranges':  'bytes',
+            'Content-Length': String(end - start + 1),
+            'Content-Type':   mimeType,
+          },
+        });
+      }
+
+      return new Response(streamFor(), {
+        status: 200,
+        headers: {
+          'Accept-Ranges':  'bytes',
+          'Content-Length': String(fileSize),
+          'Content-Type':   mimeType,
+        },
+      });
     } catch (e) {
       console.error('[local-video]', e.message);
       return new Response(null, { status: 500 });
