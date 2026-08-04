@@ -28,6 +28,12 @@ contextBridge.exposeInMainWorld('organizer', {
   trashMultiple:  (relativePaths)             => ipcRenderer.invoke('clip:trash-multiple', relativePaths),
   getDeleteList:  ()                          => ipcRenderer.invoke('clips:delete-list'),
   showInFinder:   (relativePath)              => ipcRenderer.invoke('clip:show-in-finder', relativePath),
+  revealMultiple: (relativePaths)             => ipcRenderer.invoke('clips:reveal-multiple', relativePaths),
+  startDrag:      (relativePaths)             => ipcRenderer.send('clips:start-drag', relativePaths),
+
+  // ── Tags ──────────────────────────────────────────────────────────────────
+  getPresetTags:  ()               => ipcRenderer.invoke('tags:get-presets'),
+  setPresetTags:  (tags)           => ipcRenderer.invoke('tags:set-presets', tags),
 
   // ── Settings ──────────────────────────────────────────────────────────────
   getSettings:    ()               => ipcRenderer.invoke('settings:get'),
