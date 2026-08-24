@@ -1,6 +1,6 @@
 # swachh
 
-A video organizer for editors. Browse, tag, and cull footage across any project folder.
+A video organizer for editors. Browse, tag, and cull footage across any project folder — on macOS, Windows, or Linux.
 
 Named after the Marathi/Hindi word for *clean* — स्वच्छ.
 
@@ -12,6 +12,29 @@ swachh scans a folder of video clips, pulls out metadata (camera, date, focal le
 
 ---
 
+## Walkthrough
+
+![swachh walkthrough — browsing a grid of clips, tagging, starring, marking for deletion, grouping by camera, and the settings panel](docs/screenshots/walkthrough.gif)
+
+| Grid view | Clip details & tagging | Settings |
+|---|---|---|
+| ![Grid view of clips grouped by day, with filters in the sidebar](docs/screenshots/grid-view.png) | ![Detail panel showing metadata, tags, and notes for a selected clip](docs/screenshots/detail-panel.png) | ![Settings panel for the Anthropic API key, preset tags, and a preview LUT](docs/screenshots/settings.png) |
+
+*(Screenshots above are from a sample project with placeholder test-pattern footage — your real footage will show actual video thumbnails.)*
+
+---
+
+## Requirements
+
+swachh needs two things installed before it will run:
+
+- **[Node.js](https://nodejs.org)** (18 or newer) — runs the app
+- **[ffmpeg](https://ffmpeg.org/download.html)** (which includes `ffprobe`) — reads video metadata and generates thumbnails
+
+Both are free, open-source, and used by thousands of other apps. Installation steps for each OS are below.
+
+---
+
 ## Installation (step by step, no coding experience needed)
 
 ### Step 1 — Download the app
@@ -19,58 +42,92 @@ swachh scans a folder of video clips, pulls out metadata (camera, date, focal le
 1. Go to the GitHub page for this project
 2. Click the green **Code** button near the top right
 3. Click **Download ZIP**
-4. Once it downloads, double-click the ZIP file to unzip it
+4. Once it downloads, unzip it
 5. Move the unzipped folder (called `swachh-main` or similar) somewhere you'll remember — your Desktop or Documents folder works fine
 
-### Step 2 — Open Terminal
+### Step 2 — Open a terminal
 
-Terminal is a built-in Mac app that lets you type commands. You don't need to know how to code — you'll just be copying and pasting the commands below.
+You don't need to know how to code — you'll just be copying and pasting the commands below.
 
-To open Terminal:
-- Press **⌘ + Space** to open Spotlight, type `Terminal`, and press Enter
-- Or find it in **Applications → Utilities → Terminal**
+- **macOS**: Press **⌘ + Space**, type `Terminal`, press Enter (or find it in **Applications → Utilities**)
+- **Windows**: Press **Win**, type `PowerShell`, press Enter
+- **Linux**: Open your distro's terminal app (varies by desktop environment — often **Ctrl + Alt + T**)
 
-### Step 3 — Install Homebrew (if you don't have it)
+### Step 3 — Install Node.js and ffmpeg
 
-Homebrew is a free tool that makes it easy to install software on a Mac. You only need to do this once.
+<details>
+<summary><b>macOS</b></summary>
 
-In Terminal, paste this and press Enter:
+Install [Homebrew](https://brew.sh) first if you don't have it (paste in Terminal, press Enter, enter your password when asked):
 
 ```
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-It will ask for your Mac password. Type it (nothing will appear as you type — that's normal) and press Enter. Wait for it to finish — this can take a few minutes.
+> Already have Homebrew? Skip this. Not sure? Run `brew --version` — if you see a version number, you're set.
 
-> **Already have Homebrew?** You can skip this step. If you're not sure, paste `brew --version` in Terminal and press Enter. If you see a version number, you're good.
-
-### Step 4 — Install Node.js and ffmpeg
-
-Node.js is what runs the app. ffmpeg is what reads video files. In Terminal, paste each line and press Enter, waiting for each to finish before doing the next:
+Then install Node and ffmpeg:
 
 ```
-brew install node
+brew install node ffmpeg
 ```
 
+</details>
+
+<details>
+<summary><b>Windows</b></summary>
+
+Install [Node.js](https://nodejs.org) by downloading the Windows installer from nodejs.org and running it (accept the defaults).
+
+For ffmpeg, the easiest route is [winget](https://learn.microsoft.com/windows/package-manager/winget/) (built into modern Windows) — in PowerShell:
+
 ```
-brew install ffmpeg
+winget install Gyan.FFmpeg
 ```
 
-These are free and widely used — ffmpeg alone is used by YouTube, VLC, and thousands of other apps.
+Close and reopen PowerShell afterward so it picks up the new `ffmpeg` command. If `winget` isn't available, download a build from [ffmpeg.org/download.html](https://ffmpeg.org/download.html), unzip it, and add its `bin` folder to your `PATH` (search "Edit environment variables" in the Start menu).
 
-### Step 5 — Navigate to the swachh folder
+</details>
 
-In Terminal, type `cd ` (with a space after it), then drag the swachh folder from Finder directly into the Terminal window. The folder path will appear automatically. Press Enter.
+<details>
+<summary><b>Linux</b></summary>
+
+Use your distro's package manager, for example:
+
+```
+# Debian / Ubuntu
+sudo apt install nodejs npm ffmpeg
+
+# Fedora
+sudo dnf install nodejs ffmpeg
+
+# Arch
+sudo pacman -S nodejs npm ffmpeg
+```
+
+</details>
+
+Verify both installed correctly:
+
+```
+node --version
+ffmpeg -version
+```
+
+### Step 4 — Navigate to the swachh folder
+
+In your terminal, type `cd ` (with a space after it), then drag the swachh folder from your file manager directly into the terminal window — the path will appear automatically. Press Enter.
 
 It should look something like:
 
 ```
-cd /Users/yourname/Desktop/swachh-main
+cd /Users/yourname/Desktop/swachh-main       # macOS/Linux
+cd C:\Users\yourname\Desktop\swachh-main     # Windows
 ```
 
-### Step 6 — Install swachh's dependencies
+### Step 5 — Install swachh's dependencies
 
-Still in Terminal, paste this and press Enter:
+Still in the terminal, paste this and press Enter:
 
 ```
 npm install
@@ -78,7 +135,7 @@ npm install
 
 This downloads the libraries swachh needs to run. It only needs to happen once. You'll see a lot of text scroll by — that's normal. Wait for it to finish (you'll see your cursor come back).
 
-### Step 7 — Run swachh
+### Step 6 — Run swachh
 
 ```
 npm start
@@ -86,21 +143,21 @@ npm start
 
 The app will open. On first launch, click **Choose Project Folder** and point it at a folder containing video clips. swachh will scan everything recursively and generate thumbnails — this takes a minute or two depending on how much footage you have.
 
-**Next time** you want to open swachh, just open Terminal, navigate to the folder again (Step 5), and run `npm start`.
+**Next time** you want to open swachh, just open your terminal, navigate to the folder again (Step 4), and run `npm start`.
 
 ---
 
-## Optional: Build it as a proper Mac app (so you can put it in your Dock)
-
-If you'd rather double-click to open swachh like any other Mac app:
+## Optional: Build it as a standalone desktop app
 
 ```
 npm run build
 ```
 
-This creates a file at `dist/mac-arm64/swachh.app`. Drag that file to your `/Applications` folder, then drag it from there to your Dock.
+This creates a file at `dist/mac-arm64/swachh.app`. Drag it to your `/Applications` folder, then to your Dock, to open it like any other Mac app.
 
-> **Note:** Because swachh isn't distributed through the Mac App Store, macOS may warn you the first time you open it. To get past this: right-click `swachh.app` → **Open** → **Open** again in the dialog.
+> **Note:** Packaged builds are currently macOS-only. On Windows and Linux, run swachh from source with `npm start` (Steps 4–6 above) — it works the same way, just without a double-clickable app icon. Contributions adding a Windows/Linux build target are welcome.
+
+> **Note (macOS):** Because swachh isn't distributed through the Mac App Store, macOS may warn you the first time you open it. To get past this: right-click `swachh.app` → **Open** → **Open** again in the dialog.
 
 ---
 
@@ -124,6 +181,14 @@ When you open a folder, swachh creates a hidden `.organizer/` subfolder inside i
 
 You can safely delete `.organizer/` to start completely fresh.
 
+App-level settings (last used folder, Anthropic API key) are stored separately, outside any project folder:
+
+| OS | Location |
+|---|---|
+| macOS | `~/Library/Application Support/swachh/organizer-config.json` |
+| Windows | `%APPDATA%\swachh\organizer-config.json` |
+| Linux | `~/.config/swachh/organizer-config.json` |
+
 ---
 
 ## Features
@@ -133,7 +198,7 @@ You can safely delete `.organizer/` to start completely fresh.
 | Group by | Day, Camera, Folder |
 | Filter by | Camera type, focal length, resolution, date |
 | Per-clip | Tags, notes, star, mark for deletion |
-| Delete flow | Mark → review list → confirm → moves to Trash |
+| Delete flow | Mark → review list → confirm → moves to your OS Trash / Recycle Bin |
 | Camera metadata | Aperture, ISO, shutter, white balance, LUT (Blackmagic/iPhone clips) |
 | GPS | Links to Google Maps for geotagged clips |
 
@@ -160,18 +225,30 @@ Tested with:
 - **Sony XAVC** — date, resolution
 - Any other camera that produces `.mov`, `.mp4`, `.mts`, `.m2ts`, `.avi`, or `.mkv` files
 
-> iPhone clips recorded in ProRes or HEVC will show a thumbnail preview instead of a live video player (a browser limitation). You can open them directly in QuickTime from the detail panel.
+> iPhone clips recorded in ProRes or HEVC will show a thumbnail preview instead of a live video player (a browser limitation). You can open them directly in your system's default video player from the detail panel.
+
+---
+
+## Platform notes
+
+swachh runs the same core experience on macOS, Windows, and Linux — scanning, thumbnails, tagging, filtering, starring, and deleting all work identically everywhere. A couple of things currently differ:
+
+- **"Show in Finder"** for a single clip works on every OS (opens your default file manager — Finder, Explorer, Nautilus, etc.) with the file selected.
+- **Revealing multiple starred clips at once, pre-selected in the file manager,** currently only works on macOS (it uses AppleScript under the hood). On Windows/Linux this falls back to opening the containing folder.
+- **Packaged, double-clickable builds** (`npm run build`) are macOS-only for now — see the build section above.
 
 ---
 
 ## Troubleshooting
 
-**"command not found: brew"** — Homebrew didn't install correctly. Try Step 3 again, making sure to paste the full command.
+**"command not found: node" / "'node' is not recognized"** — Node.js isn't installed or isn't on your `PATH`. Revisit Step 3 for your OS.
 
-**"command not found: npm"** — Node.js didn't install. Try `brew install node` again.
+**"command not found: ffmpeg" / "'ffmpeg' is not recognized"** — Same as above, for ffmpeg. Run `ffmpeg -version` to confirm; reinstall if you get an error.
 
 **App opens but shows a blank screen** — Make sure you selected a folder that actually contains video files.
 
-**Thumbnails not generating** — ffmpeg may not be installed. Run `ffmpeg -version` in Terminal. If you get an error, run `brew install ffmpeg` again.
+**Thumbnails not generating** — ffmpeg may not be installed or not on your `PATH`. Run `ffmpeg -version` in your terminal to check.
 
 **macOS says the app is from an unidentified developer** — Right-click `swachh.app` → Open → Open. You only have to do this once.
+
+**Windows SmartScreen warns about an unrecognized app** — Only relevant if/when a Windows build is available; click **More info → Run anyway**.
