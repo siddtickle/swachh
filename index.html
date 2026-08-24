@@ -279,13 +279,59 @@ select.toolbar-select:hover { border-color: var(--border2); color: var(--text); 
 
 /* Video player */
 .video-wrap {
-  background: #000; position: relative; flex-shrink: 0;
+  background: #000; flex-shrink: 0;
+}
+.media-wrap {
+  position: relative;
 }
 .video-wrap video {
   display: block; width: 100%; max-height: 320px; object-fit: contain;
 }
 #lut-canvas {
   display: none; max-width: 100%; max-height: 320px; margin: 0 auto;
+}
+.canvas-scrub {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  background: linear-gradient(to top, rgba(0,0,0,.7), rgba(0,0,0,0));
+}
+.canvas-scrub.hidden { display: none; }
+.cc-btn {
+  background: transparent; border: none; color: #fff; font-size: 15px;
+  padding: 2px 5px; cursor: pointer; flex-shrink: 0; line-height: 1;
+}
+.cc-btn:hover { color: var(--accent); }
+.cc-transport {
+  display: flex; align-items: center; gap: 4px;
+}
+.cc-transport.hidden { display: none; }
+.cc-time-sep { color: var(--text3); font-size: 10px; }
+.cc-time {
+  font-size: 10px; color: var(--text3); flex-shrink: 0; min-width: 26px;
+  text-align: center; font-variant-numeric: tabular-nums;
+}
+.cc-seek {
+  flex: 1; height: 3px; margin: 0; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+  background: rgba(255,255,255,.3); border-radius: 2px; outline: none;
+}
+.cc-seek::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--accent); cursor: pointer;
+}
+/* Fullscreen: media-wrap (video/canvas only, not the controls row below it)
+   becomes the fullscreen element, so its children need to be told to
+   actually fill the viewport instead of staying capped at the small
+   in-panel preview height. */
+.media-wrap:fullscreen {
+  width: 100vw; height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+}
+.media-wrap:fullscreen video,
+.media-wrap:fullscreen #lut-canvas {
+  max-width: 100vw; max-height: 100vh; width: auto; height: auto;
 }
 .vc-lut-btn {
   padding: 2px 7px; font-size: 11px; border-radius: var(--radius);
@@ -732,10 +778,26 @@ kbd {
       </div>
 
       <div class="video-wrap">
-        <video id="detail-video" controls preload="metadata"></video>
-        <canvas id="lut-canvas"></canvas>
-        <div id="video-msg" class="video-unsupported hidden"></div>
+        <div class="media-wrap">
+          <video id="detail-video" controls preload="metadata"></video>
+          <canvas id="lut-canvas"></canvas>
+          <!-- The native <video controls> bar is hidden along with the video
+               element while the LUT canvas is shown. This minimal overlay
+               stands in for just scrub + fullscreen; everything else lives
+               in .video-controls below so it doesn't collide with the video. -->
+          <div id="canvas-scrub" class="canvas-scrub hidden">
+            <input type="range" class="cc-seek" id="cc-seek" min="0" max="1000" value="0" step="1">
+            <button class="cc-btn" id="cc-fullscreen" title="Fullscreen">⛶</button>
+          </div>
+          <div id="video-msg" class="video-unsupported hidden"></div>
+        </div>
         <div class="video-controls">
+          <span id="cc-transport" class="cc-transport hidden">
+            <button class="vc-btn" id="cc-playpause" title="Play/Pause">▶</button>
+            <span class="cc-time" id="cc-current-time">0:00</span>
+            <span class="cc-time-sep">/</span>
+            <span class="cc-time" id="cc-duration">0:00</span>
+          </span>
           <button class="vc-btn" id="vc-loop" title="Loop">↺</button>
           <button class="vc-lut-btn" id="vc-lut" title="Toggle LUT preview">LUT</button>
           <div style="flex:1"></div>
@@ -2151,6 +2213,7 @@ const lut = {
   videoTex: null,  // texture unit 0 — video frame
   lutTex:   null,  // texture unit 1 — 3D LUT
   rafId:   null,   // requestAnimationFrame handle
+  floatLinear: false, // whether OES_texture_float_linear is available on lut.gl
 };
 
 // Parse a .cube file into { size, data: Float32Array }
@@ -2177,6 +2240,12 @@ function initLUTGL() {
   const canvas = document.getElementById('lut-canvas');
   const gl = canvas.getContext('webgl2');
   if (!gl) { console.warn('WebGL2 not available — LUT preview disabled'); return false; }
+
+  // 32-bit float textures (the 3D LUT below) aren't filterable with LINEAR
+  // unless this extension is explicitly requested on this context — without
+  // it the texture is "incomplete" and every sample silently returns black,
+  // which looked like the whole preview going black when LUT was toggled on.
+  lut.floatLinear = !!gl.getExtension('OES_texture_float_linear');
 
   const vs = gl.createShader(gl.VERTEX_SHADER);
   gl.shaderSource(vs, `#version 300 es
@@ -2250,8 +2319,12 @@ function uploadLUTTexture() {
   const tex = gl.createTexture();
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_3D, tex);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  // RGB32F is only filterable with LINEAR if OES_texture_float_linear is
+  // enabled (see initLUTGL) — otherwise the texture is incomplete and every
+  // sample returns black, so fall back to NEAREST (blockier, but visible).
+  const filter = lut.floatLinear ? gl.LINEAR : gl.NEAREST;
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, filter);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
@@ -2301,18 +2374,31 @@ function applyLUTState() {
   const on     = lut.enabled && lut.data;
 
   if (on) {
-    if (!lut.gl && !initLUTGL()) { lut.enabled = false; return; }
+    // Make the canvas visible BEFORE drawing to it. A display:none canvas
+    // has no live compositor surface in Chromium, so WebGL draws made while
+    // it's still hidden can silently fail to show once it's revealed —
+    // which looked exactly like "the screen goes black" when toggling LUT.
+    vid.style.display    = 'none';
+    canvas.style.display = 'block';
+    if (!lut.gl && !initLUTGL()) {
+      lut.enabled = false;
+      vid.style.display    = 'block';
+      canvas.style.display = 'none';
+      return;
+    }
     uploadLUTTexture();
     renderLUTFrame();          // paint first frame immediately
     startLUTLoop();
-    vid.style.display    = 'none';
-    canvas.style.display = 'block';
     btn.classList.add('active');
+    document.getElementById('canvas-scrub').classList.remove('hidden');
+    document.getElementById('cc-transport').classList.remove('hidden');
   } else {
     stopLUTLoop();
     vid.style.display    = 'block';
     canvas.style.display = 'none';
     btn.classList.remove('active');
+    document.getElementById('canvas-scrub').classList.add('hidden');
+    document.getElementById('cc-transport').classList.add('hidden');
   }
 }
 
@@ -2349,6 +2435,62 @@ document.getElementById('vc-lut').addEventListener('click', () => {
   lut.enabled = !lut.enabled;
   applyLUTState();
 });
+
+// ── Canvas controls — stand-in for native <video controls> while the LUT
+// canvas is shown in place of the video element (which hides its own
+// controls along with it) ────────────────────────────────────────────────
+(() => {
+  const vid       = document.getElementById('detail-video');
+  const wrap      = document.querySelector('.media-wrap');
+  const playBtn   = document.getElementById('cc-playpause');
+  const fsBtn     = document.getElementById('cc-fullscreen');
+  const seek      = document.getElementById('cc-seek');
+  const curTimeEl = document.getElementById('cc-current-time');
+  const durEl     = document.getElementById('cc-duration');
+  let seeking = false;
+
+  // fmt_dur() treats 0 as "no duration" and prints "—", which reads oddly
+  // for a live playhead sitting at the start of a clip — this always shows
+  // an actual m:ss, including 0:00.
+  function fmtTime(s) {
+    if (!isFinite(s) || s < 0) s = 0;
+    const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+    return `${m}:${String(sec).padStart(2,'0')}`;
+  }
+
+  function syncPlayButton() {
+    playBtn.textContent = vid.paused ? '▶' : '⏸';
+  }
+  function syncTime() {
+    if (seeking) return;
+    curTimeEl.textContent = fmtTime(vid.currentTime);
+    durEl.textContent     = fmtTime(vid.duration);
+    seek.value = vid.duration ? (vid.currentTime / vid.duration) * 1000 : 0;
+  }
+
+  playBtn.addEventListener('click', () => { vid.paused ? vid.play() : vid.pause(); });
+  vid.addEventListener('play',  syncPlayButton);
+  vid.addEventListener('pause', syncPlayButton);
+  vid.addEventListener('timeupdate',     syncTime);
+  vid.addEventListener('loadedmetadata', syncTime);
+
+  seek.addEventListener('input', () => {
+    seeking = true;
+    curTimeEl.textContent = fmtTime((seek.value / 1000) * (vid.duration || 0));
+  });
+  seek.addEventListener('change', () => {
+    if (vid.duration) vid.currentTime = (seek.value / 1000) * vid.duration;
+    seeking = false;
+  });
+
+  fsBtn.addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else wrap.requestFullscreen();
+  });
+  document.addEventListener('fullscreenchange', () => {
+    fsBtn.textContent = document.fullscreenElement === wrap ? '⤢' : '⛶';
+  });
+})();
 
 // ── Settings: LUT picker & clear ─────────────────────────────────────────────
 document.getElementById('btn-select-lut').addEventListener('click', async () => {
