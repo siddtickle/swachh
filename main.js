@@ -43,8 +43,8 @@ const DATA_SUBDIR  = '.organizer'; // inside the chosen project folder
 
 // ── Register custom protocols BEFORE app is ready ────────────────────────────
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'local-video', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
-  { scheme: 'local-thumb', privileges: { secure: true } },
+  { scheme: 'local-video', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } },
+  { scheme: 'local-thumb', privileges: { standard: true, secure: true, corsEnabled: true } },
 ]);
 
 // ── Config persistence ────────────────────────────────────────────────────────
@@ -950,6 +950,7 @@ app.whenReady().then(() => {
       const stat     = fs.statSync(filepath);
       const fileSize = stat.size;
       const mimeType = VIDEO_MIME_TYPES[path.extname(filepath).toLowerCase()] || 'video/mp4';
+      const corsHeaders = { 'Access-Control-Allow-Origin': '*' };
       const range    = request.headers.get('range');
       const match    = range && /^bytes=(\d*)-(\d*)$/.exec(range.trim());
 
@@ -1011,6 +1012,7 @@ app.whenReady().then(() => {
         return new Response(streamFor({ start, end }), {
           status: 206,
           headers: {
+            ...corsHeaders,
             'Content-Range':  `bytes ${start}-${end}/${fileSize}`,
             'Accept-Ranges':  'bytes',
             'Content-Length': String(end - start + 1),
@@ -1022,6 +1024,7 @@ app.whenReady().then(() => {
       return new Response(streamFor(), {
         status: 200,
         headers: {
+          ...corsHeaders,
           'Accept-Ranges':  'bytes',
           'Content-Length': String(fileSize),
           'Content-Type':   mimeType,
@@ -1045,7 +1048,14 @@ app.whenReady().then(() => {
         return new Response(null, { status: 403 });
       if (!fs.existsSync(filepath))
         return new Response(null, { status: 404 });
-      return net.fetch(pathToFileURL(filepath).toString());
+      const response = await net.fetch(pathToFileURL(filepath).toString());
+      return new Response(response.body, {
+        status: response.status,
+        headers: {
+          'Content-Type': response.headers.get('content-type') || 'image/jpeg',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
     } catch (e) {
       console.error('[local-thumb]', e.message);
       return new Response(null, { status: 500 });
