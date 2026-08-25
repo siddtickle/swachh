@@ -155,6 +155,14 @@ npm run build
 
 This creates a file at `dist/mac-arm64/swachh.app`. Drag it to your `/Applications` folder, then to your Dock, to open it like any other Mac app.
 
+After the first install, use this instead to rebuild and replace the copy in `/Applications` automatically:
+
+```
+npm run update-app
+```
+
+Quit Swachh before running the command.
+
 > **Note:** Packaged builds are currently macOS-only. On Windows and Linux, run swachh from source with `npm start` (Steps 4–6 above) — it works the same way, just without a double-clickable app icon. Contributions adding a Windows/Linux build target are welcome.
 
 > **Note (macOS):** Because swachh isn't distributed through the Mac App Store, macOS may warn you the first time you open it. To get past this: right-click `swachh.app` → **Open** → **Open** again in the dialog.

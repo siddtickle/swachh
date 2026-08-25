@@ -840,6 +840,7 @@ kbd {
         <div class="detail-section">
           <div class="detail-section-title">Tags</div>
           <div class="tags-wrap" id="active-tags"></div>
+          <div id="primary-tag-control"></div>
           <div class="preset-tags" id="preset-tags-row"></div>
           <div class="tag-input-wrap">
             <input class="tag-input" id="tag-input" type="text" placeholder="Add tag…" maxlength="32">
@@ -1434,11 +1435,26 @@ function makeCard(clip) {
     });
   }
 
+  // On macOS, Control-click is normally treated as a context-menu gesture and
+  // may never reach the click handler. Handle modifier-click selection on
+  // mousedown so Ctrl/Cmd-click consistently toggles one clip at a time.
+  let modifierSelectionHandled = false;
+  card.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || !(e.metaKey || e.ctrlKey)) return;
+    e.preventDefault();
+    modifierSelectionHandled = true;
+    toggleMultiSelect(idx);
+  });
+  card.addEventListener('contextmenu', (e) => {
+    if (e.ctrlKey) e.preventDefault();
+  });
+
   card.addEventListener('click', (e) => {
-    if (e.metaKey || e.ctrlKey) {
-      e.preventDefault();
-      toggleMultiSelect(idx);
-    } else if (e.shiftKey) {
+    if (modifierSelectionHandled) {
+      modifierSelectionHandled = false;
+      return;
+    }
+    if (e.shiftKey) {
       e.preventDefault();
       rangeSelectTo(idx);
     } else {
@@ -1612,15 +1628,34 @@ function renderMeta(id, rows) {
 
 function renderDetailTags(clip) {
   const activeTags = clip.tags || [];
+  const primaryTag = activeTags.includes(clip.primaryTag) ? clip.primaryTag : '';
 
   // Active tags (click to remove)
   const wrap = document.getElementById('active-tags');
   wrap.innerHTML = activeTags.map(t => `
-    <span class="tag-pill" data-tag="${t}">${t} <span class="tag-x"></span></span>
+    <span class="tag-pill" data-tag="${t}">${t}${t === primaryTag ? ' ★' : ''} <span class="tag-x"></span></span>
   `).join('');
   wrap.querySelectorAll('.tag-pill').forEach(el => {
     el.addEventListener('click', () => removeTag(clip, el.dataset.tag));
   });
+
+  const primaryControl = document.getElementById('primary-tag-control');
+  if (activeTags.length) {
+    const automatic = activeTags[activeTags.length - 1];
+    primaryControl.innerHTML = `
+      <label style="display:block;margin:7px 0 5px;font-size:11px;color:var(--text3)">
+        Folder tag
+        <select class="toolbar-select" id="primary-tag-select" style="margin-left:6px;font-size:11px;padding:3px 6px">
+          <option value="">Most recently added (${automatic})</option>
+          ${activeTags.map(t => `<option value="${t}" ${t === primaryTag ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+      </label>`;
+    primaryControl.querySelector('#primary-tag-select').addEventListener('change', e => {
+      setPrimaryTag(clip, e.target.value);
+    });
+  } else {
+    primaryControl.innerHTML = '';
+  }
 
   // Known tags — presets plus every custom tag used anywhere in the project
   const presetRow = document.getElementById('preset-tags-row');
@@ -1638,20 +1673,41 @@ function renderDetailTags(clip) {
 async function addTag(clip, tag) {
   if (!tag.trim()) return;
   const tags = [...new Set([...(clip.tags || []), tag.trim()])];
-  clip.tags = tags;
-  await window.organizer.updateClip(clip.relativePath, { tags });
+  if (!await saveClipTags(clip, tags, clip.primaryTag || '')) return;
   renderDetailTags(clip);
-  renderCardTags(clip);
+  renderGrid();
   buildTagFilterGroup();
   document.getElementById('tag-input').value = '';
 }
 
 async function removeTag(clip, tag) {
-  clip.tags = (clip.tags || []).filter(t => t !== tag);
-  await window.organizer.updateClip(clip.relativePath, { tags: clip.tags });
+  const tags = (clip.tags || []).filter(t => t !== tag);
+  if (!await saveClipTags(clip, tags, clip.primaryTag === tag ? '' : (clip.primaryTag || ''))) return;
   renderDetailTags(clip);
-  renderCardTags(clip);
+  renderGrid();
   buildTagFilterGroup();
+}
+
+async function setPrimaryTag(clip, primaryTag) {
+  if (!await saveClipTags(clip, clip.tags || [], primaryTag)) return;
+  renderDetailTags(clip);
+  renderGrid();
+}
+
+async function saveClipTags(clip, tags, primaryTag) {
+  const oldPath = clip.relativePath;
+  const result = await window.organizer.updateClip(oldPath, { tags, primaryTag });
+  if (!result?.ok) {
+    toast(`Couldn't organize clip: ${result?.error || 'Unknown error'}`);
+    return false;
+  }
+  clip.tags = tags;
+  clip.primaryTag = result.clip?.primaryTag || '';
+  if (result.clip) Object.assign(clip, result.clip);
+  if (oldPath !== clip.relativePath && state.selectedPaths.delete(oldPath)) {
+    state.selectedPaths.add(clip.relativePath);
+  }
+  return true;
 }
 
 function renderCardTags(clip) {
@@ -1755,8 +1811,8 @@ async function bulkToggleTag(tag) {
   await Promise.all(targets.map(async c => {
     const has = (c.tags || []).includes(tag);
     if (has === shouldHave) return; // already in the desired state
-    c.tags = shouldHave ? [...(c.tags || []), tag] : c.tags.filter(t => t !== tag);
-    await window.organizer.updateClip(c.relativePath, { tags: c.tags });
+    const tags = shouldHave ? [...(c.tags || []), tag] : c.tags.filter(t => t !== tag);
+    await saveClipTags(c, tags, c.primaryTag === tag ? '' : (c.primaryTag || ''));
   }));
   renderGrid();
   buildTagFilterGroup();
@@ -1774,8 +1830,8 @@ async function bulkAddTag(tag) {
   const targets = state.clips.filter(c => state.selectedPaths.has(c.relativePath));
   await Promise.all(targets.map(async c => {
     if ((c.tags || []).includes(tag)) return;
-    c.tags = [...new Set([...(c.tags || []), tag])];
-    await window.organizer.updateClip(c.relativePath, { tags: c.tags });
+    const tags = [...new Set([...(c.tags || []), tag])];
+    await saveClipTags(c, tags, c.primaryTag || '');
   }));
   renderGrid();
   buildTagFilterGroup();
@@ -2213,24 +2269,34 @@ const lut = {
   videoTex: null,  // texture unit 0 — video frame
   lutTex:   null,  // texture unit 1 — 3D LUT
   rafId:   null,   // requestAnimationFrame handle
-  floatLinear: false, // whether OES_texture_float_linear is available on lut.gl
 };
 
 // Parse a .cube file into { size, data: Float32Array }
 function parseCube(text) {
   const lines  = text.split('\n');
   let size     = 0;
+  let in3DData = false;
   const values = [];
   for (const raw of lines) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
-    if (line.startsWith('LUT_3D_SIZE')) { size = parseInt(line.split(/\s+/)[1]); continue; }
-    if (line.startsWith('DOMAIN_') || line.startsWith('TITLE') || line.startsWith('LUT_1D')) continue;
+    if (line.startsWith('LUT_3D_SIZE')) {
+      size = parseInt(line.split(/\s+/)[1]);
+      in3DData = true;
+      continue;
+    }
+    if (line.startsWith('LUT_1D_SIZE')) { in3DData = false; continue; }
+    if (line.startsWith('DOMAIN_') || line.startsWith('TITLE')) continue;
+    if (!in3DData) continue;
     const parts = line.split(/[\s,]+/);
     if (parts.length >= 3) {
       const r = parseFloat(parts[0]), g = parseFloat(parts[1]), b = parseFloat(parts[2]);
       if (!isNaN(r) && !isNaN(g) && !isNaN(b)) values.push(r, g, b);
     }
+  }
+  const expectedValues = size ** 3 * 3;
+  if (!size || values.length !== expectedValues) {
+    return { size: 0, data: null, error: `Expected ${expectedValues || 0} RGB values, found ${values.length}` };
   }
   return { size, data: new Float32Array(values) };
 }
@@ -2240,12 +2306,6 @@ function initLUTGL() {
   const canvas = document.getElementById('lut-canvas');
   const gl = canvas.getContext('webgl2');
   if (!gl) { console.warn('WebGL2 not available — LUT preview disabled'); return false; }
-
-  // 32-bit float textures (the 3D LUT below) aren't filterable with LINEAR
-  // unless this extension is explicitly requested on this context — without
-  // it the texture is "incomplete" and every sample silently returns black,
-  // which looked like the whole preview going black when LUT was toggled on.
-  lut.floatLinear = !!gl.getExtension('OES_texture_float_linear');
 
   const vs = gl.createShader(gl.VERTEX_SHADER);
   gl.shaderSource(vs, `#version 300 es
@@ -2257,6 +2317,10 @@ function initLUTGL() {
     }
   `);
   gl.compileShader(vs);
+  if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+    console.error('LUT vertex shader error:', gl.getShaderInfoLog(vs));
+    return false;
+  }
 
   const fs = gl.createShader(gl.FRAGMENT_SHADER);
   gl.shaderSource(fs, `#version 300 es
@@ -2275,6 +2339,10 @@ function initLUTGL() {
     }
   `);
   gl.compileShader(fs);
+  if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+    console.error('LUT fragment shader error:', gl.getShaderInfoLog(fs));
+    return false;
+  }
 
   const prog = gl.createProgram();
   gl.attachShader(prog, vs);
@@ -2311,26 +2379,33 @@ function initLUTGL() {
   return true;
 }
 
-// Upload parsed LUT data as a 3D texture (unit 1)
+// Upload the LUT as an 8-bit 3D texture (unit 1). RGB8 is linearly filterable
+// across WebGL2 implementations, unlike RGB32F on some Electron/GPU stacks.
 function uploadLUTTexture() {
   const { gl, prog, size, data } = lut;
-  if (!gl || !data) return;
+  if (!gl || !data) return false;
   if (lut.lutTex) gl.deleteTexture(lut.lutTex);
   const tex = gl.createTexture();
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_3D, tex);
-  // RGB32F is only filterable with LINEAR if OES_texture_float_linear is
-  // enabled (see initLUTGL) — otherwise the texture is incomplete and every
-  // sample returns black, so fall back to NEAREST (blockier, but visible).
-  const filter = lut.floatLinear ? gl.LINEAR : gl.NEAREST;
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, filter);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
-  gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGB32F, size, size, size, 0, gl.RGB, gl.FLOAT, data);
+  const bytes = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i++) bytes[i] = Math.round(Math.min(1, Math.max(0, data[i])) * 255);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGB8, size, size, size, 0, gl.RGB, gl.UNSIGNED_BYTE, bytes);
+  const error = gl.getError();
+  if (error !== gl.NO_ERROR) {
+    gl.deleteTexture(tex);
+    console.error('LUT texture upload error:', error);
+    return false;
+  }
   gl.uniform1f(gl.getUniformLocation(prog, 'uLutSize'), size);
   lut.lutTex = tex;
+  return true;
 }
 
 // Render one frame: copy video → canvas through LUT
@@ -2386,7 +2461,13 @@ function applyLUTState() {
       canvas.style.display = 'none';
       return;
     }
-    uploadLUTTexture();
+    if (!uploadLUTTexture()) {
+      lut.enabled = false;
+      vid.style.display = 'block';
+      canvas.style.display = 'none';
+      toast('LUT preview is not supported by this GPU');
+      return;
+    }
     renderLUTFrame();          // paint first frame immediately
     startLUTLoop();
     btn.classList.add('active');
@@ -2408,7 +2489,7 @@ async function loadLUT(filePath) {
   const text = await window.organizer.readLut(filePath);
   if (!text) { toast('Could not read LUT file'); return; }
   const parsed = parseCube(text);
-  if (!parsed.size || !parsed.data.length) { toast('Invalid .cube file'); return; }
+  if (!parsed.size || !parsed.data?.length) { toast(`Invalid .cube file: ${parsed.error || 'missing 3D LUT data'}`); return; }
   lut.path = filePath;
   lut.size = parsed.size;
   lut.data = parsed.data;
