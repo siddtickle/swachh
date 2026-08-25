@@ -287,8 +287,15 @@ select.toolbar-select:hover { border-color: var(--border2); color: var(--text); 
 .video-wrap video {
   display: block; width: 100%; max-height: 320px; object-fit: contain;
 }
+.media-wrap.lut-preview-active video {
+  /* Keep the decoded video drawable for WebGL. display:none can make
+     Chromium provide an empty/black frame to texImage2D on some GPUs. */
+  display: block !important; position: absolute; inset: 0;
+  width: 100%; height: 100%; opacity: 0; pointer-events: none;
+}
 #lut-canvas {
-  display: none; max-width: 100%; max-height: 320px; margin: 0 auto;
+  display: none; position: relative; z-index: 1;
+  max-width: 100%; max-height: 320px; margin: 0 auto;
 }
 .canvas-scrub {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
@@ -2412,25 +2419,41 @@ function uploadLUTTexture() {
 function renderLUTFrame() {
   const { gl, videoTex } = lut;
   const vid = document.getElementById('detail-video');
-  if (!gl || !vid || vid.readyState < 2) return;
+  // Metadata can arrive before a decodable frame. Wait for the next animation
+  // frame instead of treating that normal state as a preview failure.
+  if (!gl || !vid || vid.readyState < 2) return null;
 
-  const canvas = document.getElementById('lut-canvas');
-  if (canvas.width !== vid.videoWidth || canvas.height !== vid.videoHeight) {
-    canvas.width  = vid.videoWidth  || 640;
-    canvas.height = vid.videoHeight || 360;
-    gl.viewport(0, 0, canvas.width, canvas.height);
+  try {
+    const canvas = document.getElementById('lut-canvas');
+    if (canvas.width !== vid.videoWidth || canvas.height !== vid.videoHeight) {
+      canvas.width  = vid.videoWidth  || 640;
+      canvas.height = vid.videoHeight || 360;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, videoTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, vid);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    const error = gl.getError();
+    if (error !== gl.NO_ERROR) {
+      console.error('LUT video-frame upload error:', error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('LUT video-frame upload failed:', error);
+    return false;
   }
-
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, videoTex);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, vid);
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
 // rAF loop — runs while LUT is on and video is playing
 function startLUTLoop() {
   function loop() {
-    renderLUTFrame();
+    if (renderLUTFrame() === false) {
+      disableLUTPreview('LUT preview could not read this video frame');
+      return;
+    }
     lut.rafId = requestAnimationFrame(loop);
   }
   if (lut.rafId) cancelAnimationFrame(lut.rafId);
@@ -2441,11 +2464,27 @@ function stopLUTLoop() {
   if (lut.rafId) { cancelAnimationFrame(lut.rafId); lut.rafId = null; }
 }
 
+function disableLUTPreview(message = '') {
+  const vid    = document.getElementById('detail-video');
+  const canvas = document.getElementById('lut-canvas');
+  const wrap   = document.querySelector('.media-wrap');
+  stopLUTLoop();
+  lut.enabled = false;
+  wrap.classList.remove('lut-preview-active');
+  vid.style.display = 'block';
+  canvas.style.display = 'none';
+  document.getElementById('vc-lut').classList.remove('active');
+  document.getElementById('canvas-scrub').classList.add('hidden');
+  document.getElementById('cc-transport').classList.add('hidden');
+  if (message) toast(message);
+}
+
 // Show canvas (LUT on) or video (LUT off)
 function applyLUTState() {
   const vid    = document.getElementById('detail-video');
   const canvas = document.getElementById('lut-canvas');
   const btn    = document.getElementById('vc-lut');
+  const wrap   = document.querySelector('.media-wrap');
   const on     = lut.enabled && lut.data;
 
   if (on) {
@@ -2453,28 +2492,27 @@ function applyLUTState() {
     // has no live compositor surface in Chromium, so WebGL draws made while
     // it's still hidden can silently fail to show once it's revealed —
     // which looked exactly like "the screen goes black" when toggling LUT.
-    vid.style.display    = 'none';
+    wrap.classList.add('lut-preview-active');
     canvas.style.display = 'block';
     if (!lut.gl && !initLUTGL()) {
-      lut.enabled = false;
-      vid.style.display    = 'block';
-      canvas.style.display = 'none';
+      disableLUTPreview('LUT preview requires WebGL2 support');
       return;
     }
     if (!uploadLUTTexture()) {
-      lut.enabled = false;
-      vid.style.display = 'block';
-      canvas.style.display = 'none';
-      toast('LUT preview is not supported by this GPU');
+      disableLUTPreview('LUT preview is not supported by this GPU');
       return;
     }
-    renderLUTFrame();          // paint first frame immediately
+    if (renderLUTFrame() === false) {
+      disableLUTPreview('LUT preview could not read this video frame');
+      return;
+    }
     startLUTLoop();
     btn.classList.add('active');
     document.getElementById('canvas-scrub').classList.remove('hidden');
     document.getElementById('cc-transport').classList.remove('hidden');
   } else {
     stopLUTLoop();
+    wrap.classList.remove('lut-preview-active');
     vid.style.display    = 'block';
     canvas.style.display = 'none';
     btn.classList.remove('active');
