@@ -75,6 +75,14 @@ input, textarea { font-family: inherit; font-size: inherit; }
 }
 .btn-icon:hover { background: var(--surf3); color: var(--text); }
 .btn-icon.active { background: var(--accent-dim); color: var(--accent); }
+.title-lut-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--text2); font-size: 11px; cursor: pointer;
+  padding: 4px 7px; border: 1px solid var(--border); border-radius: var(--radius);
+}
+.title-lut-toggle:has(input:checked) { border-color: var(--accent); color: var(--accent); }
+.title-lut-toggle:has(input:disabled) { opacity: .45; cursor: default; }
+.title-lut-toggle input { margin: 0; accent-color: var(--accent); cursor: inherit; }
 
 /* ── Toolbar ───────────────────────────────────────────────────────────────── */
 #toolbar {
@@ -262,13 +270,11 @@ select.toolbar-select:hover { border-color: var(--border2); color: var(--text); 
 
 /* ── Detail panel ──────────────────────────────────────────────────────────── */
 #detail-panel {
-  width: 0; flex-shrink: 0; overflow: hidden;
+  width: 380px; flex-shrink: 0; overflow: hidden;
   background: var(--surf);
   border-left: 1px solid var(--border);
   display: flex; flex-direction: column;
-  transition: width .2s;
 }
-#detail-panel.open { width: 380px; }
 .detail-header {
   padding: 12px 14px;
   display: flex; align-items: center; gap: 8px;
@@ -284,11 +290,26 @@ select.toolbar-select:hover { border-color: var(--border2); color: var(--text); 
 .media-wrap {
   position: relative;
 }
+.media-wrap:not(.empty-preview) {
+  background: #000;
+}
+.media-wrap.empty-preview {
+  height: 214px; background: #000;
+}
+.media-wrap.empty-preview video,
+.media-wrap.empty-preview #lut-canvas { display: none !important; }
 .video-wrap video {
-  display: block; width: 100%; max-height: 320px; object-fit: contain;
+  display: block; width: 100%; height: 100%; max-height: none; object-fit: contain;
+}
+.media-wrap.lut-preview-active video {
+  /* Keep the decoded video drawable for WebGL. display:none can make
+     Chromium provide an empty/black frame to texImage2D on some GPUs. */
+  display: block !important; position: absolute; inset: 0;
+  width: 100%; height: 100%; opacity: 0; pointer-events: none;
 }
 #lut-canvas {
-  display: none; max-width: 100%; max-height: 320px; margin: 0 auto;
+  display: none; position: relative; z-index: 1;
+  width: 100%; height: 100%; max-width: 100%; margin: 0 auto;
 }
 .canvas-scrub {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
@@ -685,6 +706,10 @@ kbd {
     <div class="title-logo">🎬 swachh</div>
     <div class="title-folder" id="folder-label"></div>
     <div class="title-spacer"></div>
+    <label class="title-lut-toggle" title="Toggle LUT preview">
+      <input type="checkbox" id="top-lut-toggle" disabled>
+      LUT preview
+    </label>
     <button class="btn-icon" id="btn-change-folder" title="Change project folder">📁</button>
     <button class="btn-icon" id="btn-rescan" title="Re-scan folder for new clips">🔄</button>
     <button class="btn-icon" id="btn-trash-review" title="Review clips marked for deletion">
@@ -778,7 +803,7 @@ kbd {
       </div>
 
       <div class="video-wrap">
-        <div class="media-wrap">
+        <div class="media-wrap empty-preview">
           <video id="detail-video" controls preload="metadata"></video>
           <canvas id="lut-canvas"></canvas>
           <!-- The native <video controls> bar is hidden along with the video
@@ -840,6 +865,7 @@ kbd {
         <div class="detail-section">
           <div class="detail-section-title">Tags</div>
           <div class="tags-wrap" id="active-tags"></div>
+          <div id="primary-tag-control"></div>
           <div class="preset-tags" id="preset-tags-row"></div>
           <div class="tag-input-wrap">
             <input class="tag-input" id="tag-input" type="text" placeholder="Add tag…" maxlength="32">
@@ -992,6 +1018,7 @@ const state = {
   sidebarOpen: true,
   pendingDeleteList: [], // for the trash review modal
   presetTags: [],        // per-project one-click tag chips, editable in Settings
+  previewAspect: null,   // keeps the right preview steady between like-shaped clips
 };
 
 // All tags ever used on any clip, plus the project's preset tags — so a custom
@@ -1358,7 +1385,7 @@ function makeCard(clip) {
   card.innerHTML = `
     <div class="thumb-wrap">
       ${hasThumb
-        ? `<img src="${thumbSrc}" loading="lazy" alt="" onerror="this.parentElement.innerHTML='<div class=no-thumb>🎬</div>'">`
+        ? `<img src="${thumbSrc}" data-original-src="${thumbSrc}" crossorigin="anonymous" loading="lazy" alt="" onerror="this.parentElement.innerHTML='<div class=no-thumb>🎬</div>'">`
         : '<div class="no-thumb">🎬</div>'
       }
       <span class="dur-badge">${fmt_dur(clip.duration)}</span>
@@ -1376,6 +1403,9 @@ function makeCard(clip) {
       </div>
     </div>
   `;
+
+  const thumbnailImage = card.querySelector('img[data-original-src]');
+  if (thumbnailImage && lut.enabled && lut.data) queueLUTThumbnail(thumbnailImage);
 
   card.querySelector('.star-badge').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -1434,11 +1464,26 @@ function makeCard(clip) {
     });
   }
 
+  // On macOS, Control-click is normally treated as a context-menu gesture and
+  // may never reach the click handler. Handle modifier-click selection on
+  // mousedown so Ctrl/Cmd-click consistently toggles one clip at a time.
+  let modifierSelectionHandled = false;
+  card.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || !(e.metaKey || e.ctrlKey)) return;
+    e.preventDefault();
+    modifierSelectionHandled = true;
+    toggleMultiSelect(idx);
+  });
+  card.addEventListener('contextmenu', (e) => {
+    if (e.ctrlKey) e.preventDefault();
+  });
+
   card.addEventListener('click', (e) => {
-    if (e.metaKey || e.ctrlKey) {
-      e.preventDefault();
-      toggleMultiSelect(idx);
-    } else if (e.shiftKey) {
+    if (modifierSelectionHandled) {
+      modifierSelectionHandled = false;
+      return;
+    }
+    if (e.shiftKey) {
       e.preventDefault();
       rangeSelectTo(idx);
     } else {
@@ -1479,7 +1524,8 @@ function selectClip(idx) {
   const clip = state.filteredClips[idx];
   if (!clip) { closeDetail(); return; }
 
-  document.getElementById('detail-panel').classList.add('open');
+  // Keep the prior preview dimensions while the new file loads. The layout is
+  // only resized from onloadedmetadata when the incoming aspect ratio changes.
 
   // Video — fully reset before changing clip to prevent stale state
   const vid    = document.getElementById('detail-video');
@@ -1530,12 +1576,13 @@ function selectClip(idx) {
       }
     };
     vid.onloadedmetadata = () => {
-      // Portrait videos: allow more height so content isn't tiny
-      const isPortrait = vid.videoHeight > vid.videoWidth;
-      vid.style.maxHeight = isPortrait ? '420px' : '320px';
+      updatePreviewLayout(vid.videoWidth, vid.videoHeight);
       // Re-apply LUT now that video dimensions are known
       if (lut.enabled && lut.data) applyLUTState();
     };
+    // The LUT canvas reads video pixels through WebGL, which requires a
+    // CORS-enabled media request even though the custom protocol is local.
+    vid.crossOrigin = 'anonymous';
     vid.src = window.organizer.videoUrl(clip.relativePath);
     vid.load();
     // load() resets playbackRate to 1 — re-apply whatever speed is selected
@@ -1602,6 +1649,20 @@ function selectClip(idx) {
   btnAnalyze.textContent = '✨ Analyze this clip';
 }
 
+function updatePreviewLayout(width, height) {
+  if (!width || !height) return;
+  const aspect = width / height;
+  const changed = !state.previewAspect || Math.abs(state.previewAspect - aspect) > 0.01;
+  const wrap = document.querySelector('.media-wrap');
+  if (changed) {
+    const panelWidth = document.getElementById('detail-panel').clientWidth;
+    const maxHeight = aspect < 1 ? 420 : 320;
+    wrap.style.height = `${Math.min(maxHeight, panelWidth / aspect)}px`;
+    state.previewAspect = aspect;
+  }
+  wrap.classList.remove('empty-preview');
+}
+
 function renderMeta(id, rows) {
   const el = document.getElementById(id);
   el.innerHTML = rows.map(([k,v]) => `
@@ -1612,15 +1673,34 @@ function renderMeta(id, rows) {
 
 function renderDetailTags(clip) {
   const activeTags = clip.tags || [];
+  const primaryTag = activeTags.includes(clip.primaryTag) ? clip.primaryTag : '';
 
   // Active tags (click to remove)
   const wrap = document.getElementById('active-tags');
   wrap.innerHTML = activeTags.map(t => `
-    <span class="tag-pill" data-tag="${t}">${t} <span class="tag-x"></span></span>
+    <span class="tag-pill" data-tag="${t}">${t}${t === primaryTag ? ' ★' : ''} <span class="tag-x"></span></span>
   `).join('');
   wrap.querySelectorAll('.tag-pill').forEach(el => {
     el.addEventListener('click', () => removeTag(clip, el.dataset.tag));
   });
+
+  const primaryControl = document.getElementById('primary-tag-control');
+  if (activeTags.length) {
+    const automatic = activeTags[activeTags.length - 1];
+    primaryControl.innerHTML = `
+      <label style="display:block;margin:7px 0 5px;font-size:11px;color:var(--text3)">
+        Folder tag
+        <select class="toolbar-select" id="primary-tag-select" style="margin-left:6px;font-size:11px;padding:3px 6px">
+          <option value="">Most recently added (${automatic})</option>
+          ${activeTags.map(t => `<option value="${t}" ${t === primaryTag ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+      </label>`;
+    primaryControl.querySelector('#primary-tag-select').addEventListener('change', e => {
+      setPrimaryTag(clip, e.target.value);
+    });
+  } else {
+    primaryControl.innerHTML = '';
+  }
 
   // Known tags — presets plus every custom tag used anywhere in the project
   const presetRow = document.getElementById('preset-tags-row');
@@ -1638,20 +1718,41 @@ function renderDetailTags(clip) {
 async function addTag(clip, tag) {
   if (!tag.trim()) return;
   const tags = [...new Set([...(clip.tags || []), tag.trim()])];
-  clip.tags = tags;
-  await window.organizer.updateClip(clip.relativePath, { tags });
+  if (!await saveClipTags(clip, tags, clip.primaryTag || '')) return;
   renderDetailTags(clip);
-  renderCardTags(clip);
+  renderGrid();
   buildTagFilterGroup();
   document.getElementById('tag-input').value = '';
 }
 
 async function removeTag(clip, tag) {
-  clip.tags = (clip.tags || []).filter(t => t !== tag);
-  await window.organizer.updateClip(clip.relativePath, { tags: clip.tags });
+  const tags = (clip.tags || []).filter(t => t !== tag);
+  if (!await saveClipTags(clip, tags, clip.primaryTag === tag ? '' : (clip.primaryTag || ''))) return;
   renderDetailTags(clip);
-  renderCardTags(clip);
+  renderGrid();
   buildTagFilterGroup();
+}
+
+async function setPrimaryTag(clip, primaryTag) {
+  if (!await saveClipTags(clip, clip.tags || [], primaryTag)) return;
+  renderDetailTags(clip);
+  renderGrid();
+}
+
+async function saveClipTags(clip, tags, primaryTag) {
+  const oldPath = clip.relativePath;
+  const result = await window.organizer.updateClip(oldPath, { tags, primaryTag });
+  if (!result?.ok) {
+    toast(`Couldn't organize clip: ${result?.error || 'Unknown error'}`);
+    return false;
+  }
+  clip.tags = tags;
+  clip.primaryTag = result.clip?.primaryTag || '';
+  if (result.clip) Object.assign(clip, result.clip);
+  if (oldPath !== clip.relativePath && state.selectedPaths.delete(oldPath)) {
+    state.selectedPaths.add(clip.relativePath);
+  }
+  return true;
 }
 
 function renderCardTags(clip) {
@@ -1666,16 +1767,21 @@ function renderCardTags(clip) {
 
 function resetDetailPanel() {
   state.selectedIndex = -1;
-  document.getElementById('detail-panel').classList.remove('open');
   const vid = document.getElementById('detail-video');
+  stopLUTLoop();
   vid.pause();
   vid.onerror = null;
   vid.removeAttribute('src');
   vid.load();
   vid.style.display = 'block';
+  const mediaWrap = document.querySelector('.media-wrap');
+  mediaWrap.classList.remove('lut-preview-active');
+  mediaWrap.classList.add('empty-preview');
+  document.getElementById('lut-canvas').style.display = 'none';
   const msgEl = document.getElementById('video-msg');
   msgEl.innerHTML = '';
   msgEl.classList.add('hidden');
+  document.getElementById('detail-filename').textContent = '—';
 }
 
 function closeDetail() {
@@ -1695,7 +1801,8 @@ function toggleMultiSelect(idx) {
   // A single-clip detail view and a multi-selection are mutually exclusive —
   // otherwise it's ambiguous whether tagging via the detail panel or the bulk
   // bar is "the" action, and tags silently only land on the one open clip.
-  if (state.selectedPaths.size && state.selectedIndex !== -1) resetDetailPanel();
+  if (state.selectedPaths.size) previewFirstSelectedClip();
+  else resetDetailPanel();
   renderGrid();
   renderBulkBar();
 }
@@ -1708,7 +1815,8 @@ function rangeSelectTo(idx) {
     if (c) state.selectedPaths.add(c.relativePath);
   }
   state.lastClickedIndex = idx;
-  if (state.selectedPaths.size && state.selectedIndex !== -1) resetDetailPanel();
+  if (state.selectedPaths.size) previewFirstSelectedClip();
+  else resetDetailPanel();
   renderGrid();
   renderBulkBar();
 }
@@ -1716,14 +1824,23 @@ function rangeSelectTo(idx) {
 function clearMultiSelect() {
   if (!state.selectedPaths.size) return;
   state.selectedPaths.clear();
+  resetDetailPanel();
   renderGrid();
   renderBulkBar();
 }
 
 function selectAllVisible() {
   state.selectedPaths = new Set(state.filteredClips.map(c => c.relativePath));
+  previewFirstSelectedClip();
   renderGrid();
   renderBulkBar();
+}
+
+function previewFirstSelectedClip() {
+  const firstPath = state.selectedPaths.values().next().value;
+  const idx = state.filteredClips.findIndex(c => c.relativePath === firstPath);
+  if (idx >= 0) selectClip(idx);
+  else resetDetailPanel();
 }
 
 function renderBulkBar() {
@@ -1755,8 +1872,8 @@ async function bulkToggleTag(tag) {
   await Promise.all(targets.map(async c => {
     const has = (c.tags || []).includes(tag);
     if (has === shouldHave) return; // already in the desired state
-    c.tags = shouldHave ? [...(c.tags || []), tag] : c.tags.filter(t => t !== tag);
-    await window.organizer.updateClip(c.relativePath, { tags: c.tags });
+    const tags = shouldHave ? [...(c.tags || []), tag] : c.tags.filter(t => t !== tag);
+    await saveClipTags(c, tags, c.primaryTag === tag ? '' : (c.primaryTag || ''));
   }));
   renderGrid();
   buildTagFilterGroup();
@@ -1774,8 +1891,8 @@ async function bulkAddTag(tag) {
   const targets = state.clips.filter(c => state.selectedPaths.has(c.relativePath));
   await Promise.all(targets.map(async c => {
     if ((c.tags || []).includes(tag)) return;
-    c.tags = [...new Set([...(c.tags || []), tag])];
-    await window.organizer.updateClip(c.relativePath, { tags: c.tags });
+    const tags = [...new Set([...(c.tags || []), tag])];
+    await saveClipTags(c, tags, c.primaryTag || '');
   }));
   renderGrid();
   buildTagFilterGroup();
@@ -2213,26 +2330,107 @@ const lut = {
   videoTex: null,  // texture unit 0 — video frame
   lutTex:   null,  // texture unit 1 — 3D LUT
   rafId:   null,   // requestAnimationFrame handle
-  floatLinear: false, // whether OES_texture_float_linear is available on lut.gl
 };
 
 // Parse a .cube file into { size, data: Float32Array }
 function parseCube(text) {
   const lines  = text.split('\n');
   let size     = 0;
+  let in3DData = false;
   const values = [];
   for (const raw of lines) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
-    if (line.startsWith('LUT_3D_SIZE')) { size = parseInt(line.split(/\s+/)[1]); continue; }
-    if (line.startsWith('DOMAIN_') || line.startsWith('TITLE') || line.startsWith('LUT_1D')) continue;
+    if (line.startsWith('LUT_3D_SIZE')) {
+      size = parseInt(line.split(/\s+/)[1]);
+      in3DData = true;
+      continue;
+    }
+    if (line.startsWith('LUT_1D_SIZE')) { in3DData = false; continue; }
+    if (line.startsWith('DOMAIN_') || line.startsWith('TITLE')) continue;
+    if (!in3DData) continue;
     const parts = line.split(/[\s,]+/);
     if (parts.length >= 3) {
       const r = parseFloat(parts[0]), g = parseFloat(parts[1]), b = parseFloat(parts[2]);
       if (!isNaN(r) && !isNaN(g) && !isNaN(b)) values.push(r, g, b);
     }
   }
+  const expectedValues = size ** 3 * 3;
+  if (!size || values.length !== expectedValues) {
+    return { size: 0, data: null, error: `Expected ${expectedValues || 0} RGB values, found ${values.length}` };
+  }
   return { size, data: new Float32Array(values) };
+}
+
+// Grid thumbnails are graded in memory only. Processing one per animation
+// frame keeps the grid responsive and leaves the cached source thumbnails
+// untouched so the toggle can restore them immediately.
+const thumbnailLutQueue = [];
+let thumbnailLutProcessing = false;
+
+function queueLUTThumbnail(image) {
+  if (!lut.enabled || !lut.data || image.dataset.lutApplied || image.dataset.lutQueued) return;
+  const enqueue = () => {
+    if (!image.isConnected || !lut.enabled || !lut.data || image.dataset.lutApplied || image.dataset.lutQueued) return;
+    image.dataset.lutQueued = 'true';
+    thumbnailLutQueue.push(image);
+    processLUTThumbnailQueue();
+  };
+  if (image.complete && image.naturalWidth) enqueue();
+  else image.addEventListener('load', enqueue, { once: true });
+}
+
+function processLUTThumbnailQueue() {
+  if (thumbnailLutProcessing) return;
+  thumbnailLutProcessing = true;
+  const processNext = () => {
+    const image = thumbnailLutQueue.shift();
+    if (!image) { thumbnailLutProcessing = false; return; }
+    delete image.dataset.lutQueued;
+    if (image.isConnected && lut.enabled && lut.data && image.naturalWidth && !image.dataset.lutApplied) {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        context.drawImage(image, 0, 0);
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+        const levels = lut.size - 1;
+        const plane = lut.size * lut.size;
+        for (let i = 0; i < pixels.data.length; i += 4) {
+          const r = Math.round((pixels.data[i] / 255) * levels);
+          const g = Math.round((pixels.data[i + 1] / 255) * levels);
+          const b = Math.round((pixels.data[i + 2] / 255) * levels);
+          const offset = (r + g * lut.size + b * plane) * 3;
+          pixels.data[i]     = Math.round(lut.data[offset] * 255);
+          pixels.data[i + 1] = Math.round(lut.data[offset + 1] * 255);
+          pixels.data[i + 2] = Math.round(lut.data[offset + 2] * 255);
+        }
+        context.putImageData(pixels, 0, 0);
+        image.src = canvas.toDataURL('image/jpeg', 0.9);
+        image.dataset.lutApplied = 'true';
+      } catch (error) {
+        // If a browser refuses to read a particular image, retain its original
+        // thumbnail rather than replacing it with an empty preview.
+        console.warn('Could not apply LUT to thumbnail:', error);
+      }
+    }
+    requestAnimationFrame(processNext);
+  };
+  requestAnimationFrame(processNext);
+}
+
+function refreshLUTThumbnails() {
+  document.querySelectorAll('img[data-original-src]').forEach(queueLUTThumbnail);
+}
+
+function restoreOriginalThumbnails() {
+  thumbnailLutQueue.length = 0;
+  document.querySelectorAll('img[data-original-src]').forEach(image => {
+    delete image.dataset.lutQueued;
+    delete image.dataset.lutApplied;
+    if (image.src !== image.dataset.originalSrc) image.src = image.dataset.originalSrc;
+  });
 }
 
 // Initialise WebGL2 context + shaders on the canvas (once)
@@ -2240,12 +2438,6 @@ function initLUTGL() {
   const canvas = document.getElementById('lut-canvas');
   const gl = canvas.getContext('webgl2');
   if (!gl) { console.warn('WebGL2 not available — LUT preview disabled'); return false; }
-
-  // 32-bit float textures (the 3D LUT below) aren't filterable with LINEAR
-  // unless this extension is explicitly requested on this context — without
-  // it the texture is "incomplete" and every sample silently returns black,
-  // which looked like the whole preview going black when LUT was toggled on.
-  lut.floatLinear = !!gl.getExtension('OES_texture_float_linear');
 
   const vs = gl.createShader(gl.VERTEX_SHADER);
   gl.shaderSource(vs, `#version 300 es
@@ -2257,6 +2449,10 @@ function initLUTGL() {
     }
   `);
   gl.compileShader(vs);
+  if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+    console.error('LUT vertex shader error:', gl.getShaderInfoLog(vs));
+    return false;
+  }
 
   const fs = gl.createShader(gl.FRAGMENT_SHADER);
   gl.shaderSource(fs, `#version 300 es
@@ -2275,6 +2471,10 @@ function initLUTGL() {
     }
   `);
   gl.compileShader(fs);
+  if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+    console.error('LUT fragment shader error:', gl.getShaderInfoLog(fs));
+    return false;
+  }
 
   const prog = gl.createProgram();
   gl.attachShader(prog, vs);
@@ -2311,51 +2511,74 @@ function initLUTGL() {
   return true;
 }
 
-// Upload parsed LUT data as a 3D texture (unit 1)
+// Upload the LUT as an 8-bit 3D texture (unit 1). RGB8 is linearly filterable
+// across WebGL2 implementations, unlike RGB32F on some Electron/GPU stacks.
 function uploadLUTTexture() {
   const { gl, prog, size, data } = lut;
-  if (!gl || !data) return;
+  if (!gl || !data) return false;
   if (lut.lutTex) gl.deleteTexture(lut.lutTex);
   const tex = gl.createTexture();
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_3D, tex);
-  // RGB32F is only filterable with LINEAR if OES_texture_float_linear is
-  // enabled (see initLUTGL) — otherwise the texture is incomplete and every
-  // sample returns black, so fall back to NEAREST (blockier, but visible).
-  const filter = lut.floatLinear ? gl.LINEAR : gl.NEAREST;
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, filter);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
-  gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGB32F, size, size, size, 0, gl.RGB, gl.FLOAT, data);
+  const bytes = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i++) bytes[i] = Math.round(Math.min(1, Math.max(0, data[i])) * 255);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGB8, size, size, size, 0, gl.RGB, gl.UNSIGNED_BYTE, bytes);
+  const error = gl.getError();
+  if (error !== gl.NO_ERROR) {
+    gl.deleteTexture(tex);
+    console.error('LUT texture upload error:', error);
+    return false;
+  }
   gl.uniform1f(gl.getUniformLocation(prog, 'uLutSize'), size);
   lut.lutTex = tex;
+  return true;
 }
 
 // Render one frame: copy video → canvas through LUT
 function renderLUTFrame() {
   const { gl, videoTex } = lut;
   const vid = document.getElementById('detail-video');
-  if (!gl || !vid || vid.readyState < 2) return;
+  // Metadata can arrive before a decodable frame. Wait for the next animation
+  // frame instead of treating that normal state as a preview failure.
+  if (!gl || !vid || vid.readyState < 2) return null;
 
-  const canvas = document.getElementById('lut-canvas');
-  if (canvas.width !== vid.videoWidth || canvas.height !== vid.videoHeight) {
-    canvas.width  = vid.videoWidth  || 640;
-    canvas.height = vid.videoHeight || 360;
-    gl.viewport(0, 0, canvas.width, canvas.height);
+  try {
+    const canvas = document.getElementById('lut-canvas');
+    if (canvas.width !== vid.videoWidth || canvas.height !== vid.videoHeight) {
+      canvas.width  = vid.videoWidth  || 640;
+      canvas.height = vid.videoHeight || 360;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, videoTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, vid);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    const error = gl.getError();
+    if (error !== gl.NO_ERROR) {
+      console.error('LUT video-frame upload error:', error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('LUT video-frame upload failed:', error);
+    return false;
   }
-
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, videoTex);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, vid);
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
 // rAF loop — runs while LUT is on and video is playing
 function startLUTLoop() {
   function loop() {
-    renderLUTFrame();
+    if (renderLUTFrame() === false) {
+      disableLUTPreview('LUT preview could not read this video frame');
+      return;
+    }
     lut.rafId = requestAnimationFrame(loop);
   }
   if (lut.rafId) cancelAnimationFrame(lut.rafId);
@@ -2366,11 +2589,35 @@ function stopLUTLoop() {
   if (lut.rafId) { cancelAnimationFrame(lut.rafId); lut.rafId = null; }
 }
 
+function disableLUTPreview(message = '') {
+  const vid    = document.getElementById('detail-video');
+  const canvas = document.getElementById('lut-canvas');
+  const wrap   = document.querySelector('.media-wrap');
+  stopLUTLoop();
+  lut.enabled = false;
+  wrap.classList.remove('lut-preview-active');
+  vid.style.display = 'block';
+  canvas.style.display = 'none';
+  document.getElementById('vc-lut').classList.remove('active');
+  document.getElementById('canvas-scrub').classList.add('hidden');
+  document.getElementById('cc-transport').classList.add('hidden');
+  restoreOriginalThumbnails();
+  syncLUTToggleControls();
+  if (message) toast(message);
+}
+
+function syncLUTToggleControls() {
+  const checkbox = document.getElementById('top-lut-toggle');
+  checkbox.disabled = !lut.data;
+  checkbox.checked = !!lut.enabled && !!lut.data;
+}
+
 // Show canvas (LUT on) or video (LUT off)
 function applyLUTState() {
   const vid    = document.getElementById('detail-video');
   const canvas = document.getElementById('lut-canvas');
   const btn    = document.getElementById('vc-lut');
+  const wrap   = document.querySelector('.media-wrap');
   const on     = lut.enabled && lut.data;
 
   if (on) {
@@ -2378,28 +2625,36 @@ function applyLUTState() {
     // has no live compositor surface in Chromium, so WebGL draws made while
     // it's still hidden can silently fail to show once it's revealed —
     // which looked exactly like "the screen goes black" when toggling LUT.
-    vid.style.display    = 'none';
+    wrap.classList.add('lut-preview-active');
     canvas.style.display = 'block';
     if (!lut.gl && !initLUTGL()) {
-      lut.enabled = false;
-      vid.style.display    = 'block';
-      canvas.style.display = 'none';
+      disableLUTPreview('LUT preview requires WebGL2 support');
       return;
     }
-    uploadLUTTexture();
-    renderLUTFrame();          // paint first frame immediately
+    if (!uploadLUTTexture()) {
+      disableLUTPreview('LUT preview is not supported by this GPU');
+      return;
+    }
+    if (renderLUTFrame() === false) {
+      disableLUTPreview('LUT preview could not read this video frame');
+      return;
+    }
     startLUTLoop();
     btn.classList.add('active');
     document.getElementById('canvas-scrub').classList.remove('hidden');
     document.getElementById('cc-transport').classList.remove('hidden');
+    refreshLUTThumbnails();
   } else {
     stopLUTLoop();
+    wrap.classList.remove('lut-preview-active');
     vid.style.display    = 'block';
     canvas.style.display = 'none';
     btn.classList.remove('active');
     document.getElementById('canvas-scrub').classList.add('hidden');
     document.getElementById('cc-transport').classList.add('hidden');
+    restoreOriginalThumbnails();
   }
+  syncLUTToggleControls();
 }
 
 // Load a LUT from disk (called on startup and after picking a file)
@@ -2408,12 +2663,14 @@ async function loadLUT(filePath) {
   const text = await window.organizer.readLut(filePath);
   if (!text) { toast('Could not read LUT file'); return; }
   const parsed = parseCube(text);
-  if (!parsed.size || !parsed.data.length) { toast('Invalid .cube file'); return; }
+  if (!parsed.size || !parsed.data?.length) { toast(`Invalid .cube file: ${parsed.error || 'missing 3D LUT data'}`); return; }
   lut.path = filePath;
   lut.size = parsed.size;
   lut.data = parsed.data;
   lut.lutTex = null; // force re-upload next time
   updateLUTSettingsUI();
+  syncLUTToggleControls();
+  if (lut.enabled) refreshLUTThumbnails();
 }
 
 function updateLUTSettingsUI() {
@@ -2427,13 +2684,19 @@ function updateLUTSettingsUI() {
 }
 
 // ── LUT button in video controls ─────────────────────────────────────────────
-document.getElementById('vc-lut').addEventListener('click', () => {
+function toggleLUTPreview(enabled) {
   if (!lut.data) {
     toast('No LUT loaded — choose one in ⚙ Settings');
     return;
   }
-  lut.enabled = !lut.enabled;
+  lut.enabled = enabled;
   applyLUTState();
+}
+document.getElementById('vc-lut').addEventListener('click', () => {
+  toggleLUTPreview(!lut.enabled);
+});
+document.getElementById('top-lut-toggle').addEventListener('change', e => {
+  toggleLUTPreview(e.target.checked);
 });
 
 // ── Canvas controls — stand-in for native <video controls> while the LUT

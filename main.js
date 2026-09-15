@@ -43,8 +43,8 @@ const DATA_SUBDIR  = '.organizer'; // inside the chosen project folder
 
 // ── Register custom protocols BEFORE app is ready ────────────────────────────
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'local-video', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
-  { scheme: 'local-thumb', privileges: { secure: true } },
+  { scheme: 'local-video', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } },
+  { scheme: 'local-thumb', privileges: { standard: true, secure: true, corsEnabled: true } },
 ]);
 
 // ── Config persistence ────────────────────────────────────────────────────────
@@ -158,6 +158,7 @@ function mergeWithUserData(clips, projectFolder) {
   return clips.map(c => ({
     ...c,
     tags:         (ud[c.relativePath] || {}).tags         ?? [],
+    primaryTag:   (ud[c.relativePath] || {}).primaryTag   ?? '',
     notes:        (ud[c.relativePath] || {}).notes        ?? '',
     starred:      (ud[c.relativePath] || {}).starred      ?? false,
     markedDelete: (ud[c.relativePath] || {}).markedDelete ?? false,
@@ -491,16 +492,153 @@ function setupIPC() {
     return mergeWithUserData(clips, PROJECT_FOLDER);
   });
 
-  // Update clip annotations
+  function folderForTag(tag) {
+    const folder = String(tag || '').trim();
+    if (!folder || folder.startsWith('.') || folder === '..' || /[\\/\0]/.test(folder)) {
+      throw new Error('Tags used as folders cannot contain slashes.');
+    }
+    return folder;
+  }
+
+  function uniqueDestination(folder, filename) {
+    const extension = path.extname(filename);
+    const stem = path.basename(filename, extension);
+    let candidate = path.join(folder, filename);
+    let number = 2;
+    while (fs.existsSync(candidate)) {
+      candidate = path.join(folder, `${stem} (${number})${extension}`);
+      number++;
+    }
+    return candidate;
+  }
+
+  // Tag folders are only removed when they contain absolutely nothing. This is
+  // stricter than checking for video files alone, so Swachh never deletes a
+  // folder that still contains footage or any other user-created files.
+  function removeEmptyTagFolder(folder) {
+    try {
+      if (fs.statSync(folder).isDirectory() && fs.readdirSync(folder).length === 0) {
+        fs.rmdirSync(folder);
+      }
+    } catch {
+      // A missing folder or a folder we cannot inspect is always left alone.
+    }
+  }
+
+  // Update clip annotations and, when tags change, keep the file in its
+  // primary tag folder. With no explicit primary tag, the newest tag wins;
+  // removing the final tag returns the file to where it was first organized.
   ipcMain.handle('clip:update', (_, relativePath, updates) => {
     if (!PROJECT_FOLDER) return { ok: false };
     const ud = loadUserData(PROJECT_FOLDER);
-    ud[relativePath] = ud[relativePath] || {};
-    for (const key of ['tags', 'notes', 'starred', 'markedDelete']) {
-      if (key in updates) ud[relativePath][key] = updates[key];
+    const previous = ud[relativePath] || {};
+    const next = { ...previous };
+    for (const key of ['tags', 'primaryTag', 'notes', 'starred', 'markedDelete']) {
+      if (key in updates) next[key] = updates[key];
     }
-    saveUserData(PROJECT_FOLDER, ud);
-    return { ok: true };
+
+    const tagsChanged = 'tags' in updates || 'primaryTag' in updates;
+    const tags = Array.isArray(next.tags) ? next.tags : [];
+    const previousTags = Array.isArray(previous.tags) ? previous.tags : [];
+    if (next.primaryTag && !tags.includes(next.primaryTag)) next.primaryTag = '';
+
+    // Remember the original relative path only once, before the first tag
+    // moves the file. It lets us restore the original folder after all tags
+    // are removed, even across app restarts.
+    if (tagsChanged && tags.length && !next.originalRelativePath) {
+      next.originalRelativePath = relativePath;
+    }
+    const shouldRestoreOriginal = tagsChanged && !tags.length && !!next.originalRelativePath;
+
+    if (!tagsChanged || (!tags.length && !shouldRestoreOriginal)) {
+      ud[relativePath] = next;
+      saveUserData(PROJECT_FOLDER, ud);
+      return { ok: true, clip: { relativePath, primaryTag: next.primaryTag || '' } };
+    }
+
+    try {
+      const sourcePath = path.resolve(PROJECT_FOLDER, relativePath);
+      const projectPrefix = `${path.resolve(PROJECT_FOLDER)}${path.sep}`;
+      if (!sourcePath.startsWith(projectPrefix) || !fs.existsSync(sourcePath)) {
+        throw new Error('Original clip file was not found.');
+      }
+
+      // Only a folder that was the clip's prior tag destination is eligible
+      // for cleanup. Original project subfolders are never deleted.
+      let oldTagFolder = null;
+      if (previousTags.length) {
+        try {
+          const previousTag = previous.primaryTag && previousTags.includes(previous.primaryTag)
+            ? previous.primaryTag
+            : previousTags[previousTags.length - 1];
+          const candidate = path.join(PROJECT_FOLDER, folderForTag(previousTag));
+          if (path.dirname(sourcePath) === candidate) oldTagFolder = candidate;
+        } catch {
+          // Invalid legacy tag names are not eligible for folder cleanup.
+        }
+      }
+
+      let destinationFolder;
+      let destinationFilename;
+      if (tags.length) {
+        const destinationTag = next.primaryTag || tags[tags.length - 1];
+        destinationFolder = path.join(PROJECT_FOLDER, folderForTag(destinationTag));
+        destinationFilename = path.basename(relativePath);
+      } else {
+        const originalPath = path.resolve(PROJECT_FOLDER, next.originalRelativePath);
+        if (!originalPath.startsWith(projectPrefix)) {
+          throw new Error('Original clip folder is outside this project.');
+        }
+        destinationFolder = path.dirname(originalPath);
+        destinationFilename = path.basename(originalPath);
+      }
+
+      fs.mkdirSync(destinationFolder, { recursive: true });
+      const preferredDestination = path.join(destinationFolder, destinationFilename);
+      const destinationPath = sourcePath === preferredDestination
+        ? sourcePath
+        : uniqueDestination(destinationFolder, destinationFilename);
+      const newRelativePath = path.relative(PROJECT_FOLDER, destinationPath);
+
+      if (sourcePath !== destinationPath) fs.renameSync(sourcePath, destinationPath);
+
+      const data = loadClips(PROJECT_FOLDER);
+      const storedClip = data.clips.find(c => c.relativePath === relativePath);
+      const oldThumbnail = storedClip?.thumbnail || thumbName(relativePath);
+      const newThumbnail = thumbName(newRelativePath);
+      const { thumbDir, clipsJson } = getProjectPaths(PROJECT_FOLDER);
+      const oldThumbnailPath = path.join(thumbDir, oldThumbnail);
+      const newThumbnailPath = path.join(thumbDir, newThumbnail);
+      if (oldThumbnailPath !== newThumbnailPath && fs.existsSync(oldThumbnailPath)) {
+        fs.renameSync(oldThumbnailPath, newThumbnailPath);
+      }
+
+      if (storedClip) {
+        storedClip.relativePath = newRelativePath;
+        storedClip.filename = path.basename(destinationPath);
+        storedClip.subfolder = path.dirname(newRelativePath) === '.' ? '' : path.dirname(newRelativePath);
+        storedClip.thumbnail = newThumbnail;
+        fs.writeFileSync(clipsJson, JSON.stringify(data, null, 2));
+      }
+      delete ud[relativePath];
+      ud[newRelativePath] = next;
+      saveUserData(PROJECT_FOLDER, ud);
+      if (oldTagFolder && oldTagFolder !== destinationFolder) {
+        removeEmptyTagFolder(oldTagFolder);
+      }
+      return {
+        ok: true,
+        clip: {
+          relativePath: newRelativePath,
+          filename: path.basename(destinationPath),
+          subfolder: path.dirname(newRelativePath) === '.' ? '' : path.dirname(newRelativePath),
+          thumbnail: newThumbnail,
+          primaryTag: next.primaryTag || '',
+        },
+      };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
   });
 
   // Preset tags — per-project, customizable one-click tag chips
@@ -812,6 +950,7 @@ app.whenReady().then(() => {
       const stat     = fs.statSync(filepath);
       const fileSize = stat.size;
       const mimeType = VIDEO_MIME_TYPES[path.extname(filepath).toLowerCase()] || 'video/mp4';
+      const corsHeaders = { 'Access-Control-Allow-Origin': '*' };
       const range    = request.headers.get('range');
       const match    = range && /^bytes=(\d*)-(\d*)$/.exec(range.trim());
 
@@ -873,6 +1012,7 @@ app.whenReady().then(() => {
         return new Response(streamFor({ start, end }), {
           status: 206,
           headers: {
+            ...corsHeaders,
             'Content-Range':  `bytes ${start}-${end}/${fileSize}`,
             'Accept-Ranges':  'bytes',
             'Content-Length': String(end - start + 1),
@@ -884,6 +1024,7 @@ app.whenReady().then(() => {
       return new Response(streamFor(), {
         status: 200,
         headers: {
+          ...corsHeaders,
           'Accept-Ranges':  'bytes',
           'Content-Length': String(fileSize),
           'Content-Type':   mimeType,
@@ -907,7 +1048,14 @@ app.whenReady().then(() => {
         return new Response(null, { status: 403 });
       if (!fs.existsSync(filepath))
         return new Response(null, { status: 404 });
-      return net.fetch(pathToFileURL(filepath).toString());
+      const response = await net.fetch(pathToFileURL(filepath).toString());
+      return new Response(response.body, {
+        status: response.status,
+        headers: {
+          'Content-Type': response.headers.get('content-type') || 'image/jpeg',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
     } catch (e) {
       console.error('[local-thumb]', e.message);
       return new Response(null, { status: 500 });

@@ -6,13 +6,21 @@
   "scripts": {
     "start": "electron .",
     "prebuild": "node scripts/copy-ffmpeg.js",
-    "build": "electron-builder build --mac"
+    "build": "electron-builder build --mac",
+    "update-app": "npm run build && node scripts/install-macos-app.js"
   },
   "build": {
     "appId": "com.sid.swachh",
     "productName": "swachh",
     "mac": {
-      "target": [{ "target": "dir", "arch": ["arm64"] }],
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
       "category": "public.app-category.photography"
     },
     "directories": {
@@ -25,12 +33,18 @@
       "package.json"
     ],
     "extraResources": [
-      { "from": "vendor/ffmpeg",  "to": "bin/ffmpeg" },
-      { "from": "vendor/ffprobe", "to": "bin/ffprobe" }
+      {
+        "from": "vendor/ffmpeg",
+        "to": "bin/ffmpeg"
+      },
+      {
+        "from": "vendor/ffprobe",
+        "to": "bin/ffprobe"
+      }
     ]
   },
   "devDependencies": {
-    "electron": "^29.4.6",
-    "electron-builder": "^24.13.3"
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3"
   }
 }
