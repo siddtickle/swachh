@@ -3,19 +3,22 @@
   "version": "1.0.0",
   "description": "Swachh — browse, tag, and cull any video project",
   "main": "main.js",
+  "license": "MIT",
   "scripts": {
     "start": "electron .",
     "prebuild": "node scripts/copy-ffmpeg.js",
     "build": "electron-builder build --mac",
+    "postbuild": "node scripts/write-manifest.js",
     "update-app": "npm run build && node scripts/install-macos-app.js"
   },
   "build": {
     "appId": "com.sid.swachh",
     "productName": "swachh",
+    "afterPack": "scripts/adhoc-sign.js",
     "mac": {
       "target": [
         {
-          "target": "dir",
+          "target": "dmg",
           "arch": [
             "arm64"
           ]
@@ -40,6 +43,10 @@
       {
         "from": "vendor/ffprobe",
         "to": "bin/ffprobe"
+      },
+      {
+        "from": "vendor/libs",
+        "to": "bin/libs"
       }
     ]
   },
