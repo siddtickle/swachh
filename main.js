@@ -476,6 +476,8 @@ function setupIPC() {
   // Start extraction
   ipcMain.handle('extraction:start', () => {
     if (!PROJECT_FOLDER) return { error: 'No project folder set' };
+    if (!fs.existsSync(PROJECT_FOLDER))
+      return { error: `Project folder not found:\n${PROJECT_FOLDER}\n\nIf it lives on an external drive, connect it and pick the folder again.` };
     if (extractionStatus.running) return { alreadyRunning: true };
     if (!FFPROBE || !FFMPEG)
       return { error: 'ffprobe/ffmpeg not found.\nInstall via Terminal: brew install ffmpeg' };

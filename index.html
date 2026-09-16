@@ -1099,23 +1099,10 @@ async function boot() {
     document.getElementById('ffmpeg-warning').classList.remove('hidden');
   }
 
-  if (!info.projectFolder) {
-    // No folder saved — show setup screen
-    showSetup();
-    return;
-  }
-
-  document.getElementById('folder-label').textContent = info.projectFolder.split('/').pop();
-
-  if (!info.clipsExist) {
-    // Folder known but not yet scanned
-    showLoading();
-    const r = await window.organizer.startExtraction();
-    if (r.error) { alert(r.error); showSetup(); return; }
-    listenExtraction(() => loadAndShowApp());
-  } else {
-    await loadAndShowApp();
-  }
+  // Always start at the folder picker. Resuming the last folder stranded the
+  // app whenever that path was gone — an unplugged drive left it scanning a
+  // folder that no longer existed.
+  showSetup();
 }
 
 function showSetup() {
@@ -1155,6 +1142,7 @@ function listenExtraction(onComplete) {
       setTimeout(onComplete, 600);
     }
   });
+  return unsub;
 }
 
 async function loadAndShowApp() {
@@ -2020,9 +2008,11 @@ document.getElementById('btn-pick-folder').addEventListener('click', async () =>
   document.getElementById('folder-label').textContent = result.folder.split('/').pop();
   if (!result.clipsExist) {
     showLoading();
+    // Subscribe before starting: extraction can fail synchronously and emit its
+    // only progress event before startExtraction() has even returned.
+    const stop = listenExtraction(() => loadAndShowApp());
     const r = await window.organizer.startExtraction();
-    if (r.error) { alert(r.error); return; }
-    listenExtraction(() => loadAndShowApp());
+    if (r.error) { stop(); alert(r.error); showSetup(); return; }
   } else {
     await loadAndShowApp();
   }
@@ -2038,9 +2028,9 @@ document.getElementById('btn-change-folder').addEventListener('click', async () 
   document.getElementById('clip-grid-container').innerHTML = '';
   if (!result.clipsExist) {
     showLoading();
+    const stop = listenExtraction(() => loadAndShowApp());
     const r = await window.organizer.startExtraction();
-    if (r.error) { alert(r.error); return; }
-    listenExtraction(() => loadAndShowApp());
+    if (r.error) { stop(); alert(r.error); showSetup(); return; }
   } else {
     await loadAndShowApp();
   }
