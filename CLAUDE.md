@@ -151,7 +151,6 @@ Batch analysis uses a fire-and-forget pattern with a `analysisCancelled` flag in
 
 ## Known limitations / future work
 
-- **No video scrubbing on hover** — cards show a static thumbnail; adding hover-scrub would require either `<video>` elements per card or sprite sheets
 - **ffprobe camera detection is heuristic** — Sony and Fujifilm detection works on known naming conventions; other cameras fall through to "Unknown"
 - **AI analysis frame sampling is fixed at 3 frames** — for long clips, more frames would give better results
 - **No multi-select in grid** — you can only select one clip at a time; batch-tag or batch-star is not yet implemented

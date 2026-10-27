@@ -313,6 +313,7 @@ select.toolbar-select:hover { border-color: var(--border2); color: var(--text); 
 }
 .media-wrap {
   position: relative;
+  margin: 0 auto;
 }
 .media-wrap:not(.empty-preview) {
   background: #000;
@@ -1681,16 +1682,21 @@ function selectClip(idx) {
   btnAnalyze.textContent = '✨ Analyze this clip';
 }
 
-// Recomputes the preview box's pixel height from the current detail-panel
+// Recomputes the preview box's pixel size from the current detail-panel
 // width and the loaded clip's aspect ratio. Called both when a new clip
 // loads and live while the panel is being dragged wider/narrower, so
-// resizing the panel directly makes the preview bigger or smaller.
+// resizing the panel directly makes the preview bigger or smaller — while
+// the box itself always keeps the clip's exact aspect ratio (shrink-wrapped
+// and centered, never letterboxed) instead of stretching to fill the panel.
 function applyPreviewHeight() {
   if (!state.previewAspect) return;
   const wrap = document.querySelector('.media-wrap');
   const panelWidth = document.getElementById('detail-panel').clientWidth;
   const maxHeight = Math.round(window.innerHeight * 0.75);
-  wrap.style.height = `${Math.min(maxHeight, panelWidth / state.previewAspect)}px`;
+  const height = Math.min(maxHeight, panelWidth / state.previewAspect);
+  const width = Math.min(panelWidth, height * state.previewAspect);
+  wrap.style.height = `${height}px`;
+  wrap.style.width = `${width}px`;
 }
 
 function updatePreviewLayout(width, height) {
@@ -1819,6 +1825,7 @@ function resetDetailPanel() {
   mediaWrap.classList.remove('lut-preview-active');
   mediaWrap.classList.add('empty-preview');
   mediaWrap.style.height = ''; // fall back to the empty-preview CSS height
+  mediaWrap.style.width = '';
   state.previewAspect = null;
   document.getElementById('lut-canvas').style.display = 'none';
   const msgEl = document.getElementById('video-msg');
