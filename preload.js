@@ -70,5 +70,6 @@ contextBridge.exposeInMainWorld('organizer', {
   // Use a fixed host ('v') so the path portion is never lowercased by Chromium.
   // Encode each path segment individually so real slashes remain as separators.
   videoUrl: (relativePath)  => `local-video://v/${relativePath.split('/').map(encodeURIComponent).join('/')}`,
+  photoUrl: (relativePath)  => `local-photo://v/${relativePath.split('/').map(encodeURIComponent).join('/')}`,
   thumbUrl: (thumbFilename) => `local-thumb://v/${encodeURIComponent(thumbFilename)}`,
 });
