@@ -68,6 +68,27 @@ input, textarea { font-family: inherit; font-size: inherit; }
 .title-logo { font-size: 14px; font-weight: 700; color: var(--text); letter-spacing: -0.3px; }
 .title-folder { font-size: 11px; color: var(--text3); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .title-spacer { flex: 1; }
+
+/* Videos / Photos switch */
+.media-tabs {
+  display: flex; gap: 2px; margin-left: 4px;
+  background: var(--surf2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 2px;
+}
+.media-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 11px; border-radius: 4px; background: transparent;
+  color: var(--text3); font-size: 12px; font-weight: 600;
+  transition: background .15s, color .15s;
+}
+.media-tab:hover { color: var(--text); }
+.media-tab.active { background: var(--surf3); color: var(--text); }
+.media-tab-count {
+  font-size: 10px; font-weight: 700; color: var(--text3);
+  background: var(--surf); padding: 0 5px; border-radius: 7px;
+  min-width: 16px; text-align: center;
+}
+.media-tab.active .media-tab-count { color: var(--accent); }
 .btn-icon {
   width: 30px; height: 30px; border-radius: var(--radius);
   background: transparent; color: var(--text2);
@@ -322,7 +343,11 @@ select.toolbar-select:hover { border-color: var(--border2); color: var(--text); 
   height: 214px; background: #000;
 }
 .media-wrap.empty-preview video,
+.media-wrap.empty-preview #detail-photo,
 .media-wrap.empty-preview #lut-canvas { display: none !important; }
+#detail-photo {
+  display: none; width: 100%; height: 100%; object-fit: contain;
+}
 .video-wrap video {
   display: block; width: 100%; height: 100%; max-height: none; object-fit: contain;
 }
@@ -376,6 +401,7 @@ select.toolbar-select:hover { border-color: var(--border2); color: var(--text); 
   display: flex; align-items: center; justify-content: center;
 }
 .media-wrap:fullscreen video,
+.media-wrap:fullscreen #detail-photo,
 .media-wrap:fullscreen #lut-canvas {
   max-width: 100vw; max-height: 100vh; width: auto; height: auto;
 }
@@ -697,28 +723,28 @@ kbd {
 <div id="setup-screen" class="hidden">
   <div class="setup-icon">🎬</div>
   <div class="setup-title">swachh</div>
-  <div class="setup-subtitle">Choose a project folder to get started. The app will find all video files recursively across nested folders.</div>
+  <div class="setup-subtitle">Choose a project folder to get started. The app will find all video and photo files recursively across nested folders.</div>
 
   <div id="ffmpeg-warning" class="setup-warning hidden">
     <div class="setup-warning-title">⚠ ffmpeg not found</div>
     <div class="setup-warning-body">
-      ffmpeg is required to generate thumbnails and read video metadata.<br><br>
+      ffmpeg is required to read video metadata and make video thumbnails. Photos are handled by macOS itself, so the Photos tab works without it.<br><br>
       Install via Homebrew:<br>
       <code>brew install ffmpeg</code><br><br>
       Then restart this app.
     </div>
   </div>
 
-  <button class="btn-primary" id="btn-pick-folder">Choose Video Folder</button>
+  <button class="btn-primary" id="btn-pick-folder">Choose Project Folder</button>
 </div>
 
 <!-- ── Extraction progress screen ────────────────────────────────────────── -->
 <div id="loading-screen" class="hidden">
   <div class="setup-icon">⚙️</div>
-  <div class="setup-title">Scanning Videos</div>
+  <div class="setup-title">Scanning Media</div>
   <div class="progress-detail" id="progress-detail">Starting…</div>
   <div class="progress-wrap">
-    <div class="progress-label"><span id="progress-done">0</span> / <span id="progress-total">0</span> clips processed</div>
+    <div class="progress-label"><span id="progress-done">0</span> / <span id="progress-total">0</span> files processed</div>
     <div class="progress-bar-track"><div class="progress-bar-fill" id="progress-bar"></div></div>
     <div class="progress-current" id="progress-current"></div>
   </div>
@@ -730,6 +756,14 @@ kbd {
   <div id="titlebar">
     <div class="title-logo">🎬 swachh</div>
     <div class="title-folder" id="folder-label"></div>
+    <div class="media-tabs">
+      <button class="media-tab active" data-media="video" title="Browse video clips">
+        🎬 Videos <span class="media-tab-count" id="tab-count-video">0</span>
+      </button>
+      <button class="media-tab" data-media="photo" title="Browse photos">
+        📷 Photos <span class="media-tab-count" id="tab-count-photo">0</span>
+      </button>
+    </div>
     <div class="title-spacer"></div>
     <label class="title-lut-toggle" title="Toggle LUT preview">
       <input type="checkbox" id="top-lut-toggle" disabled>
@@ -751,7 +785,7 @@ kbd {
   <div id="toolbar">
     <div class="search-wrap">
       <span class="icon">🔍</span>
-      <input id="search-input" type="text" placeholder="Search clips, tags, notes…">
+      <input id="search-input" type="text" placeholder="Search by name, tag, note…">
     </div>
     <div class="toolbar-sep"></div>
 
@@ -765,7 +799,7 @@ kbd {
     <span class="seg-label">Sort</span>
     <select class="toolbar-select" id="sort-select">
       <option value="date">Date</option>
-      <option value="duration">Duration</option>
+      <option value="duration" id="sort-option-duration">Duration</option>
       <option value="name">Filename</option>
       <option value="size">File size</option>
     </select>
@@ -776,11 +810,11 @@ kbd {
 
     <div class="toolbar-sep"></div>
     <button class="seg-btn" data-filter="starred" title="Show starred only">⭐ Starred</button>
-    <button class="seg-btn" data-filter="blank" title="Show blank/accidental candidates">⚠ Blank</button>
+    <button class="seg-btn" id="btn-filter-blank" data-filter="blank" title="Show blank/accidental candidates">⚠ Blank</button>
     <button class="seg-btn" data-filter="untagged" title="Show untagged clips">🏷 Untagged</button>
 
     <div class="toolbar-sep"></div>
-    <button class="btn-analyze" id="btn-analyze-all" title="Analyze all visible clips with AI (requires API key)">✨ Analyze All</button>
+    <button class="btn-analyze" id="btn-analyze-all" title="Analyze everything visible with AI (requires API key)">✨ Analyze All</button>
   </div>
 
   <!-- Main content -->
@@ -813,7 +847,7 @@ kbd {
     <!-- Grid -->
     <div id="grid-area">
       <div class="empty-state" id="empty-state">
-        <div class="empty-state-icon">🎬</div>
+        <div class="empty-state-icon" id="empty-state-icon">🎬</div>
         <div class="empty-state-text">No clips loaded</div>
       </div>
       <div id="clip-grid-container"></div>
@@ -836,6 +870,7 @@ kbd {
       <div class="video-wrap">
         <div class="media-wrap empty-preview">
           <video id="detail-video" controls preload="metadata"></video>
+          <img id="detail-photo" alt="">
           <canvas id="lut-canvas"></canvas>
           <!-- The native <video controls> bar is hidden along with the video
                element while the LUT canvas is shown. This minimal overlay
@@ -847,7 +882,7 @@ kbd {
           </div>
           <div id="video-msg" class="video-unsupported hidden"></div>
         </div>
-        <div class="video-controls">
+        <div class="video-controls" id="video-controls-row">
           <span id="cc-transport" class="cc-transport hidden">
             <button class="vc-btn" id="cc-playpause" title="Play/Pause">▶</button>
             <span class="cc-time" id="cc-current-time">0:00</span>
@@ -993,7 +1028,7 @@ kbd {
 <!-- ── Analysis progress overlay ──────────────────────────────────────────── -->
 <div id="analysis-overlay" class="hidden">
   <div class="analysis-progress-box">
-    <h2>✨ Analyzing Clips</h2>
+    <h2>✨ Analyzing</h2>
     <div class="progress-label" id="analysis-progress-label">0 / 0 clips</div>
     <div class="progress-bar-track">
       <div class="progress-bar-fill" id="analysis-progress-bar" style="background:var(--purple)"></div>
@@ -1010,7 +1045,7 @@ kbd {
   <div class="modal">
     <h2>🗑 Review Delete List</h2>
     <div class="modal-desc">
-      These clips are marked for deletion. Review and remove any you want to keep, then confirm to move them all to the macOS Trash.
+      These files are marked for deletion. Review and remove any you want to keep, then confirm to move them all to the macOS Trash.
     </div>
     <div class="modal-list" id="trash-modal-list"></div>
     <div class="modal-actions">
@@ -1043,7 +1078,8 @@ function setUIPref(key, value) {
 // State
 // ═══════════════════════════════════════════════════════════════════════════
 const state = {
-  clips: [],           // all clips merged with user data
+  clips: [],           // every video and photo, merged with user data
+  mediaTab: getUIPref('mediaTab', 'video') === 'photo' ? 'photo' : 'video',
   filteredClips: [],   // after filters applied
   selectedIndex: -1,   // index into filteredClips (single-clip detail view)
   selectedPaths: new Set(), // relativePaths of multi-selected clips (Finder-style grid selection)
@@ -1067,6 +1103,19 @@ const state = {
   previewAspect: null,   // keeps the right preview steady between like-shaped clips
 };
 
+// Everything belonging to the tab currently being browsed. The Videos and
+// Photos tabs are two views over one library: filters, selection, grouping and
+// sorting all work off this list, while tags, stars and delete marks stay
+// shared so a tag invented on a clip is still one click away on a photo.
+function activeMedia() {
+  return state.clips.filter(c => (c.mediaType || 'video') === state.mediaTab);
+}
+
+function mediaNoun(n, tab = state.mediaTab) {
+  const word = tab === 'photo' ? 'photo' : 'clip';
+  return `${word}${n === 1 ? '' : 's'}`;
+}
+
 // All tags ever used on any clip, plus the project's preset tags — so a custom
 // tag typed on one clip becomes a one-click chip on every other clip from then on.
 function getKnownTags() {
@@ -1082,7 +1131,7 @@ function getKnownTags() {
 
 function countByTag() {
   const map = {};
-  for (const c of state.clips) {
+  for (const c of activeMedia()) {
     for (const t of (c.tags || [])) map[t] = (map[t] || 0) + 1;
   }
   return map;
@@ -1122,6 +1171,12 @@ function day_label(day) {
     const d = new Date(day + 'T12:00:00Z');
     return d.toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   } catch { return day; }
+}
+// Resolution facet: footage buckets into 4K/FHD classes, stills into
+// megapixels — "4K" says nothing useful about a 40-megapixel raw file.
+function resBucket(clip) {
+  if (clip.mediaType === 'photo') return clip.megapixels ? `${clip.megapixels} MP` : '';
+  return fmt_res(clip.width, clip.height);
 }
 function cam_chip_class(type) {
   return `clip-chip chip-${type || 'unknown'}`;
@@ -1177,7 +1232,7 @@ function listenExtraction(onComplete) {
     document.getElementById('progress-total').textContent = data.total;
     document.getElementById('progress-current').textContent = data.current || '';
 
-    let detail = data.running ? `Extracting metadata and thumbnails…` : '✓ Complete!';
+    let detail = data.running ? 'Extracting metadata and thumbnails…' : '✓ Complete!';
     if (data.complete && data.errors && data.errors.length) {
       detail = `Done — ${data.errors.length} file(s) could not be read`;
     }
@@ -1195,21 +1250,107 @@ async function loadAndShowApp() {
   await loadSettings();
   state.clips      = await window.organizer.getClips();
   state.presetTags = await window.organizer.getPresetTags();
-  buildSidebarFilters();
-  applyFilters();
+  updateMediaTabCounts();
 
-  // Show a helpful hint if 0 clips came back
-  const emptyText = document.querySelector('#empty-state .empty-state-text');
-  if (state.clips.length === 0) {
-    emptyText.textContent = 'No clips found. Make sure the folder contains .mov, .mp4, .mkv, .avi, or .mts files and try Rescan.';
-  } else {
-    emptyText.textContent = 'No clips match the current filters.';
+  // Open on a tab that actually has something in it — a stills-only shoot
+  // shouldn't greet you with an empty Videos grid.
+  const other = state.mediaTab === 'video' ? 'photo' : 'video';
+  if (!activeMedia().length) {
+    const otherTab = state.mediaTab;
+    state.mediaTab = other;
+    if (!activeMedia().length) state.mediaTab = otherTab;
   }
 
+  syncMediaTabUI();
+  buildSidebarFilters();
+  applyFilters();
   renderGrid();
   updateTrashCount();
   updateStarredCount();
   showApp();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Videos / Photos tabs
+// ═══════════════════════════════════════════════════════════════════════════
+function setMediaTab(tab) {
+  if (state.mediaTab === tab) return;
+  state.mediaTab = tab;
+  setUIPref('mediaTab', tab);
+
+  // Sidebar facets list the values found in one media type's files, so keeping
+  // them checked across a tab switch would silently hide the whole other tab.
+  state.filters.cameras.clear();
+  state.filters.days.clear();
+  state.filters.focal.clear();
+  state.filters.res.clear();
+  state.filters.tags.clear();
+  state.selectedPaths.clear();
+  state.lastClickedIndex = -1;
+
+  resetDetailPanel();
+  syncMediaTabUI();
+  buildSidebarFilters();
+  applyFilters();
+  renderGrid();
+  renderBulkBar();
+}
+
+// Brings everything that only makes sense for one media type in line with the
+// active tab: duration sorting, the blank-clip filter and the LUT preview are
+// all video-only ideas.
+function syncMediaTabUI() {
+  const isPhoto = state.mediaTab === 'photo';
+  document.querySelectorAll('[data-media]').forEach(btn =>
+    btn.classList.toggle('active', btn.dataset.media === state.mediaTab));
+
+  document.getElementById('sort-option-duration').hidden = isPhoto;
+  if (isPhoto && state.sortBy === 'duration') {
+    state.sortBy = 'date';
+    document.getElementById('sort-select').value = 'date';
+  }
+
+  const blankBtn = document.getElementById('btn-filter-blank');
+  blankBtn.classList.toggle('hidden', isPhoto);
+  if (isPhoto && state.filters.blank) {
+    state.filters.blank = false;
+    blankBtn.classList.remove('active');
+  }
+
+  document.querySelector('.title-lut-toggle').classList.toggle('hidden', isPhoto);
+  if (isPhoto && lut.enabled) {
+    lut.enabled = false;
+    applyLUTState();
+  }
+
+  document.getElementById('empty-state-icon').textContent = isPhoto ? '📷' : '🎬';
+  document.getElementById('search-input').placeholder = isPhoto
+    ? 'Search photos, tags, notes…'
+    : 'Search clips, tags, notes…';
+  document.getElementById('btn-analyze-clip').textContent = isPhoto
+    ? '✨ Analyze this photo'
+    : '✨ Analyze this clip';
+  updateEmptyStateText();
+}
+
+function updateMediaTabCounts() {
+  const photos = state.clips.filter(c => (c.mediaType || 'video') === 'photo').length;
+  document.getElementById('tab-count-video').textContent = state.clips.length - photos;
+  document.getElementById('tab-count-photo').textContent = photos;
+}
+
+function updateEmptyStateText() {
+  const el = document.querySelector('#empty-state .empty-state-text');
+  const isPhoto = state.mediaTab === 'photo';
+  if (!activeMedia().length) {
+    el.textContent = isPhoto
+      ? 'No photos in this project yet. If the folder does have stills — or it was scanned before photos were supported — hit 🔄 Rescan.'
+      : 'No clips found. Make sure the folder contains .mov, .mp4, .mkv, .avi, or .mts files and try Rescan.';
+  } else {
+    el.textContent = isPhoto
+      ? 'No photos match the current filters.'
+      : 'No clips match the current filters.';
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1220,7 +1361,7 @@ function buildSidebarFilters() {
     if (checked) state.filters.cameras.add(v); else state.filters.cameras.delete(v);
     applyFilters(); renderGrid();
   }, (v) => {
-    const labels = { iphone:'iPhone', fujifilm:'Fujifilm X-E4', sony:'Sony XAVC', unknown:'Unknown' };
+    const labels = { iphone:'iPhone', fujifilm:'Fujifilm', sony:'Sony', unknown:'Unknown' };
     return `<span class="cam-dot cam-${v}"></span>${labels[v] || v}`;
   });
 
@@ -1234,7 +1375,7 @@ function buildSidebarFilters() {
     applyFilters(); renderGrid();
   });
 
-  buildCheckGroup('filter-res', countBy(c => fmt_res(c.width, c.height)), (v) => state.filters.res.has(v), (v,checked) => {
+  buildCheckGroup('filter-res', countBy(resBucket), (v) => state.filters.res.has(v), (v,checked) => {
     if (checked) state.filters.res.add(v); else state.filters.res.delete(v);
     applyFilters(); renderGrid();
   });
@@ -1251,7 +1392,7 @@ function buildTagFilterGroup() {
 
 function countBy(keyOrFn) {
   const map = {};
-  for (const c of state.clips) {
+  for (const c of activeMedia()) {
     const k = typeof keyOrFn === 'function' ? keyOrFn(c) : c[keyOrFn];
     if (k) map[k] = (map[k] || 0) + 1;
   }
@@ -1280,7 +1421,7 @@ function buildCheckGroup(containerId, counts, isChecked, onChange, labelFn) {
 // Filter & sort
 // ═══════════════════════════════════════════════════════════════════════════
 function applyFilters() {
-  let clips = [...state.clips];
+  let clips = activeMedia();
 
   // Search
   if (state.search) {
@@ -1306,7 +1447,7 @@ function applyFilters() {
   if (state.filters.cameras.size) clips = clips.filter(c => state.filters.cameras.has(c.cameraType));
   if (state.filters.days.size)    clips = clips.filter(c => state.filters.days.has(c.day));
   if (state.filters.focal.size)   clips = clips.filter(c => state.filters.focal.has(c.focalLength));
-  if (state.filters.res.size)     clips = clips.filter(c => state.filters.res.has(fmt_res(c.width, c.height)));
+  if (state.filters.res.size)     clips = clips.filter(c => state.filters.res.has(resBucket(c)));
   if (state.filters.tags.size)    clips = clips.filter(c => (c.tags || []).some(t => state.filters.tags.has(t)));
 
   // Toggle filters
@@ -1335,6 +1476,7 @@ function renderGrid() {
   const empty     = document.getElementById('empty-state');
 
   if (!state.filteredClips.length) {
+    updateEmptyStateText();
     empty.classList.remove('hidden');
     container.innerHTML = '';
     return;
@@ -1352,9 +1494,12 @@ function renderGrid() {
     const header = document.createElement('div');
     header.className = 'day-header';
     const totalDur = groupClips.reduce((s, c) => s + (c.duration || 0), 0);
+    const groupMeta = state.mediaTab === 'photo'
+      ? `${groupClips.length} ${mediaNoun(groupClips.length)}`
+      : `${groupClips.length} ${mediaNoun(groupClips.length)} · ${fmt_dur(totalDur)}`;
     header.innerHTML = `
       <span class="day-title">${label}</span>
-      <span class="day-meta">${groupClips.length} clip${groupClips.length !== 1 ? 's' : ''} · ${fmt_dur(totalDur)}</span>
+      <span class="day-meta">${groupMeta}</span>
     `;
     groupEl.appendChild(header);
     groupEl.appendChild(makeGrid(groupClips));
@@ -1377,7 +1522,7 @@ function makeGrid(clips) {
 
 function groupClips(clips) {
   if (state.groupBy === 'none') {
-    return [{ label: 'All Clips', clips }];
+    return [{ label: state.mediaTab === 'photo' ? 'All Photos' : 'All Clips', clips }];
   }
 
   const map = new Map();
@@ -1409,21 +1554,33 @@ function makeCard(clip) {
   ].filter(Boolean).join(' ');
   card.dataset.index = idx;
 
+  const isPhoto  = clip.mediaType === 'photo';
   const hasThumb = !!clip.thumbnail;
   const thumbSrc = hasThumb ? window.organizer.thumbUrl(clip.thumbnail) : '';
+  const fallbackIcon = isPhoto ? '📷' : '🎬';
 
   const tags = (clip.tags || []).slice(0, 2).map(t =>
     `<span class="tag-chip">${t}</span>`
   ).join('');
 
+  // A photo's badges read format + megapixels; a clip's read length +
+  // resolution class. Photo thumbnails skip data-original-src so the LUT
+  // preview, which is a grading tool for footage, leaves them alone.
+  const leftBadge = isPhoto
+    ? (clip.codec ? `<span class="dur-badge">${clip.codec}</span>` : '')
+    : `<span class="dur-badge">${fmt_dur(clip.duration)}</span>`;
+  const rightBadge = isPhoto
+    ? (clip.megapixels ? `<span class="res-badge">${clip.megapixels} MP</span>` : '')
+    : (clip.width ? `<span class="res-badge">${fmt_res(clip.width, clip.height)}</span>` : '');
+
   card.innerHTML = `
     <div class="thumb-wrap">
       ${hasThumb
-        ? `<img src="${thumbSrc}" data-original-src="${thumbSrc}" crossorigin="anonymous" loading="lazy" alt="" onerror="this.parentElement.innerHTML='<div class=no-thumb>🎬</div>'">`
-        : '<div class="no-thumb">🎬</div>'
+        ? `<img src="${thumbSrc}" ${isPhoto ? '' : `data-original-src="${thumbSrc}" crossorigin="anonymous"`} loading="lazy" alt="" onerror="this.parentElement.innerHTML='<div class=no-thumb>${fallbackIcon}</div>'">`
+        : `<div class="no-thumb">${fallbackIcon}</div>`
       }
-      <span class="dur-badge">${fmt_dur(clip.duration)}</span>
-      ${clip.width ? `<span class="res-badge">${fmt_res(clip.width, clip.height)}</span>` : ''}
+      ${leftBadge}
+      ${rightBadge}
       ${clip.isBlankCandidate ? '<span class="blank-badge">BLANK?</span>' : ''}
       ${clip.markedDelete ? '<span class="delete-badge">🗑</span>' : ''}
       <span class="star-badge" title="${clip.starred ? 'Unstar' : 'Star'} this clip">⭐</span>
@@ -1449,7 +1606,7 @@ function makeCard(clip) {
   // Hover-scrub: drag the mouse across the thumbnail to preview frames from
   // across the clip, using a muted <video> layered over the static thumbnail.
   const codec = (clip.codec || '').toLowerCase();
-  const scrubUnsupported = clip.cameraType === 'iphone' ||
+  const scrubUnsupported = isPhoto || clip.cameraType === 'iphone' ||
     codec === 'prores' || codec === 'prores_ks' || codec === 'dnxhd';
   if (!scrubUnsupported && clip.duration) {
     const thumbWrap = card.querySelector('.thumb-wrap');
@@ -1563,7 +1720,9 @@ function selectClip(idx) {
 
   // Video — fully reset before changing clip to prevent stale state
   const vid    = document.getElementById('detail-video');
+  const img    = document.getElementById('detail-photo');
   const msgEl  = document.getElementById('video-msg');
+  const isPhoto = clip.mediaType === 'photo';
   stopLUTLoop(); // stop rAF before src change
   vid.pause();
   vid.onerror  = null;
@@ -1571,6 +1730,12 @@ function selectClip(idx) {
   vid.removeAttribute('src');
   vid.load(); // abort any in-flight request
   vid.style.display = 'block';
+  img.onload  = null;
+  img.onerror = null;
+  img.removeAttribute('src');
+  img.style.display = 'none';
+  // Transport, speed and LUT controls belong to footage, not to stills.
+  document.getElementById('video-controls-row').classList.toggle('hidden', isPhoto);
   msgEl.innerHTML = '';
   msgEl.classList.add('hidden');
 
@@ -1587,7 +1752,24 @@ function selectClip(idx) {
   const isIphone = clip.cameraType === 'iphone';
   const isUnsupportedCodec = codec === 'prores' || codec === 'prores_ks' || codec === 'dnxhd';
 
-  if (isIphone || isUnsupportedCodec) {
+  if (isPhoto) {
+    // Raw files and HEICs come back as a cached JPEG rendered by the main
+    // process; everything else is served straight from disk.
+    vid.style.display = 'none';
+    img.style.display = 'block';
+    img.onload  = () => updatePreviewLayout(img.naturalWidth, img.naturalHeight);
+    img.onerror = () => {
+      img.style.display = 'none';
+      const thumbSrc = clip.thumbnail ? window.organizer.thumbUrl(clip.thumbnail) : null;
+      showVideoMsg(
+        (thumbSrc ? `<img src="${thumbSrc}" style="max-width:100%;max-height:280px;object-fit:contain;display:block;border-radius:4px">` : '') +
+        `<div style="margin-top:${thumbSrc ? 8 : 0}px;font-size:11px;color:var(--text3)">
+          Full preview unavailable · <a href="#" data-qt style="color:var(--accent)">Show in Finder</a>
+        </div>`
+      );
+    };
+    img.src = window.organizer.photoUrl(clip.relativePath);
+  } else if (isIphone || isUnsupportedCodec) {
     // Show proxy thumbnail instead of attempting video playback
     const thumbSrc = clip.thumbnail ? window.organizer.thumbUrl(clip.thumbnail) : null;
     const label = isIphone ? 'iPhone (ProRes/HEVC)' : codec.startsWith('prores') ? 'ProRes' : 'DNxHD';
@@ -1629,7 +1811,9 @@ function selectClip(idx) {
   // Camera metadata
   const camMeta = [];
   if (clip.camera)       camMeta.push(['Camera', clip.camera]);
-  if (clip.focalLength)  camMeta.push(['Focal length', clip.focalLength]);
+  if (isPhoto && clip.lens) camMeta.push(['Lens', clip.lens]);
+  if (clip.focalLength)  camMeta.push([isPhoto && clip.focalActual ? 'Focal length (35mm eq.)' : 'Focal length', clip.focalLength]);
+  if (isPhoto && clip.focalActual) camMeta.push(['Focal length (actual)', clip.focalActual]);
   if (clip.aperture)     camMeta.push(['Aperture', clip.aperture]);
   if (clip.iso)          camMeta.push(['ISO', clip.iso]);
   if (clip.shutter)      camMeta.push(['Shutter', clip.shutter]);
@@ -1644,7 +1828,15 @@ function selectClip(idx) {
   renderMeta('meta-camera', camMeta);
 
   // File metadata
-  const fileMeta = [
+  const fileMeta = (isPhoto ? [
+    ['Filename', clip.filename],
+    clip.subfolder ? ['Subfolder', clip.subfolder] : null,
+    ['Dimensions', clip.width ? `${clip.width}×${clip.height}` : '—'],
+    clip.megapixels ? ['Megapixels', `${clip.megapixels} MP`] : null,
+    ['Format', clip.codec || '—'],
+    ['Size', fmt_size(clip.size)],
+    ['Taken', fmt_date(clip.date)],
+  ] : [
     ['Filename', clip.filename],
     clip.subfolder ? ['Subfolder', clip.subfolder] : null,
     ['Duration', fmt_dur(clip.duration)],
@@ -1653,7 +1845,7 @@ function selectClip(idx) {
     ['Codec', clip.codec || '—'],
     ['Size', fmt_size(clip.size)],
     ['Recorded', fmt_date(clip.date)],
-  ].filter(Boolean);
+  ]).filter(Boolean);
   renderMeta('meta-file', fileMeta);
 
   // Tags
@@ -1671,7 +1863,7 @@ function selectClip(idx) {
   const btnStar   = document.getElementById('btn-star');
   const btnDelete = document.getElementById('btn-mark-delete');
   btnStar.className   = `btn-action btn-star ${clip.starred ? 'starred' : ''}`;
-  btnStar.textContent = clip.starred ? '★ Starred' : '⭐ Star this clip';
+  btnStar.textContent = clip.starred ? '★ Starred' : (isPhoto ? '⭐ Star this photo' : '⭐ Star this clip');
   btnDelete.className = `btn-action btn-delete ${clip.markedDelete ? 'marked' : ''}`;
   btnDelete.textContent = clip.markedDelete ? '✓ Marked for deletion' : '🗑 Mark for deletion';
 
@@ -1679,7 +1871,7 @@ function selectClip(idx) {
   updateAnalysisDisplay(clip);
   const btnAnalyze = document.getElementById('btn-analyze-clip');
   btnAnalyze.classList.remove('loading');
-  btnAnalyze.textContent = '✨ Analyze this clip';
+  btnAnalyze.textContent = isPhoto ? '✨ Analyze this photo' : '✨ Analyze this clip';
 }
 
 // Recomputes the preview box's pixel size from the current detail-panel
@@ -1821,6 +2013,11 @@ function resetDetailPanel() {
   vid.removeAttribute('src');
   vid.load();
   vid.style.display = 'block';
+  const img = document.getElementById('detail-photo');
+  img.onload  = null;
+  img.onerror = null;
+  img.removeAttribute('src');
+  img.style.display = 'none';
   const mediaWrap = document.querySelector('.media-wrap');
   mediaWrap.classList.remove('lut-preview-active');
   mediaWrap.classList.add('empty-preview');
@@ -1898,7 +2095,7 @@ function renderBulkBar() {
   const n   = state.selectedPaths.size;
   if (!n) { bar.classList.add('hidden'); return; }
   bar.classList.remove('hidden');
-  document.getElementById('bulk-count').textContent = `${n} clip${n !== 1 ? 's' : ''} selected`;
+  document.getElementById('bulk-count').textContent = `${n} ${mediaNoun(n)} selected`;
 
   const targets = state.clips.filter(c => state.selectedPaths.has(c.relativePath));
   const chips = document.getElementById('bulk-tag-chips');
@@ -1929,8 +2126,8 @@ async function bulkToggleTag(tag) {
   buildTagFilterGroup();
   renderBulkBar();
   toast(allHave
-    ? `Removed "${tag}" from ${targets.length} clip${targets.length !== 1 ? 's' : ''}`
-    : `🏷 Tagged ${targets.length} clip${targets.length !== 1 ? 's' : ''} "${tag}"`);
+    ? `Removed "${tag}" from ${targets.length} ${mediaNoun(targets.length)}`
+    : `🏷 Tagged ${targets.length} ${mediaNoun(targets.length)} "${tag}"`);
 }
 
 // Free-text input in the bulk bar: always additive (typing a tag to remove it
@@ -1947,7 +2144,7 @@ async function bulkAddTag(tag) {
   renderGrid();
   buildTagFilterGroup();
   renderBulkBar();
-  toast(`🏷 Tagged ${targets.length} clip${targets.length !== 1 ? 's' : ''} "${tag}"`);
+  toast(`🏷 Tagged ${targets.length} ${mediaNoun(targets.length)} "${tag}"`);
 }
 
 function debounce(fn, ms) {
@@ -1999,8 +2196,8 @@ async function revealStarredInFinder() {
   const starred = state.clips.filter(c => c.starred);
   if (!starred.length) { toast('No starred clips yet'); return; }
   const result = await window.organizer.revealMultiple(starred.map(c => c.relativePath));
-  if (!result.ok) { toast('Could not reveal clips in Finder'); return; }
-  toast(`📤 Revealed ${result.revealed} clip${result.revealed !== 1 ? 's' : ''} in ${result.windows} Finder window${result.windows !== 1 ? 's' : ''}`);
+  if (!result.ok) { toast('Could not reveal files in Finder'); return; }
+  toast(`📤 Revealed ${result.revealed} file${result.revealed !== 1 ? 's' : ''} in ${result.windows} Finder window${result.windows !== 1 ? 's' : ''}`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2052,12 +2249,13 @@ async function confirmTrash() {
   for (const rp of trashed) state.selectedPaths.delete(rp);
   applyFilters();
   renderGrid();
+  updateMediaTabCounts();
   updateTrashCount();
   updateStarredCount();
   renderBulkBar();
 
   document.getElementById('trash-modal').classList.add('hidden');
-  toast(`🗑 ${result.trashed.length} clip${result.trashed.length !== 1 ? 's' : ''} moved to Trash`);
+  toast(`🗑 ${result.trashed.length} file${result.trashed.length !== 1 ? 's' : ''} moved to Trash`);
   if (state.selectedIndex >= state.filteredClips.length) closeDetail();
 }
 
@@ -2175,6 +2373,11 @@ document.getElementById('search-input').addEventListener('input', e => {
   state.search = e.target.value;
   applyFilters();
   renderGrid();
+});
+
+// Videos / Photos tabs
+document.querySelectorAll('[data-media]').forEach(btn => {
+  btn.addEventListener('click', () => setMediaTab(btn.dataset.media));
 });
 
 // Group by buttons
@@ -2947,7 +3150,7 @@ async function analyzeCurrentClip() {
     }
   } finally {
     btn.classList.remove('loading');
-    btn.textContent = '✨ Analyze this clip';
+    btn.textContent = clip.mediaType === 'photo' ? '✨ Analyze this photo' : '✨ Analyze this clip';
   }
 }
 
@@ -2955,14 +3158,14 @@ async function analyzeAll() {
   if (!settings.apiKey) { openSettings(); toast('Enter your Anthropic API key first'); return; }
 
   const targets = state.filteredClips.filter(c => !c.analysis);
-  if (!targets.length) { toast('All visible clips already analyzed'); return; }
+  if (!targets.length) { toast(`All visible ${mediaNoun(2)} already analyzed`); return; }
 
   // Warn if there are long clips in the batch
   const longClips = targets.filter(c => (c.duration || 0) > 120);
   if (longClips.length > 0) {
     const totalDur = targets.reduce((s, c) => s + (c.duration || 0), 0);
     const ok = confirm(
-      `Analyzing ${targets.length} clip${targets.length !== 1 ? 's' : ''} ` +
+      `Analyzing ${targets.length} ${mediaNoun(targets.length)} ` +
       `(${longClips.length} over 2 minutes, total footage: ${fmtDurLong(totalDur)}).\n\n` +
       `Long clips take more time to process. This batch may run for several minutes.\n\n` +
       `Continue?`
@@ -2971,7 +3174,7 @@ async function analyzeAll() {
   }
 
   document.getElementById('analysis-overlay').classList.remove('hidden');
-  document.getElementById('analysis-progress-label').textContent = `0 / ${targets.length} clips`;
+  document.getElementById('analysis-progress-label').textContent = `0 / ${targets.length} ${mediaNoun(targets.length)}`;
   document.getElementById('analysis-progress-bar').style.width = '0%';
   document.getElementById('analysis-progress-current').textContent = '';
 
@@ -2981,7 +3184,7 @@ async function analyzeAll() {
 window.organizer.onAnalysisProgress(data => {
   const pct = data.total ? (data.done / data.total * 100) : 0;
   document.getElementById('analysis-progress-bar').style.width = pct + '%';
-  document.getElementById('analysis-progress-label').textContent = `${data.done} / ${data.total} clips`;
+  document.getElementById('analysis-progress-label').textContent = `${data.done} / ${data.total} ${mediaNoun(data.total)}`;
   document.getElementById('analysis-progress-current').textContent = data.current || '';
 });
 
@@ -2998,7 +3201,7 @@ window.organizer.onAnalysisResult(data => {
 
 window.organizer.onAnalysisComplete(data => {
   document.getElementById('analysis-overlay').classList.add('hidden');
-  toast(`✨ ${data.done} clip${data.done !== 1 ? 's' : ''} analyzed`);
+  toast(`✨ ${data.done} ${mediaNoun(data.done)} analyzed`);
 });
 
 document.getElementById('btn-analyze-clip').addEventListener('click', analyzeCurrentClip);

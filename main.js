@@ -28,6 +28,15 @@ const VIDEO_MIME_TYPES = {
   '.mkv':  'video/x-matroska',
 };
 
+const PHOTO_MIME_TYPES = {
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png':  'image/png',
+  '.gif':  'image/gif',
+  '.webp': 'image/webp',
+  '.bmp':  'image/bmp',
+};
+
 // ── Enable hardware video decode (HEVC/H.265 on macOS via VideoToolbox) ───────
 // Must be called before app.whenReady()
 if (process.platform === 'darwin') {
@@ -37,7 +46,17 @@ if (process.platform === 'darwin') {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const VIDEO_EXTS   = new Set(['.mov', '.mp4', '.mts', '.m2ts', '.avi', '.mkv']);
-const SKIP_DIRS    = new Set(['.organizer', 'thumbnails', 'node_modules', '.Trash', '$RECYCLE.BIN']);
+const PHOTO_EXTS   = new Set([
+  // Web-native and common interchange formats
+  '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic', '.heif', '.tif', '.tiff',
+  // Camera raw — read through macOS's own image stack (sips), which decodes
+  // the manufacturer formats ffmpeg generally can't.
+  '.raf', '.arw', '.cr2', '.cr3', '.nef', '.dng', '.orf', '.rw2', '.raw', '.srw', '.pef',
+]);
+// What Chromium can put straight into an <img>. Everything else (raw, HEIC,
+// TIFF) is previewed through a cached JPEG rendered on demand by sips.
+const WEB_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
+const SKIP_DIRS    = new Set(['.organizer', 'thumbnails', 'previews', 'node_modules', '.Trash', '$RECYCLE.BIN']);
 const CONFIG_PATH  = path.join(app.getPath('userData'), 'organizer-config.json');
 const DATA_SUBDIR  = '.organizer'; // inside the chosen project folder
 
@@ -45,6 +64,7 @@ const DATA_SUBDIR  = '.organizer'; // inside the chosen project folder
 protocol.registerSchemesAsPrivileged([
   { scheme: 'local-video', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } },
   { scheme: 'local-thumb', privileges: { standard: true, secure: true, corsEnabled: true } },
+  { scheme: 'local-photo', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
 ]);
 
 // ── Config persistence ────────────────────────────────────────────────────────
@@ -59,10 +79,11 @@ function saveConfig(data) {
 function getProjectPaths(projectFolder) {
   const dataDir        = path.join(projectFolder, DATA_SUBDIR);
   const thumbDir       = path.join(dataDir, 'thumbnails');
+  const previewDir     = path.join(dataDir, 'previews');
   const clipsJson      = path.join(dataDir, 'clips.json');
   const userDataJson   = path.join(dataDir, 'user_data.json');
   const presetTagsJson = path.join(dataDir, 'preset_tags.json');
-  return { dataDir, thumbDir, clipsJson, userDataJson, presetTagsJson };
+  return { dataDir, thumbDir, previewDir, clipsJson, userDataJson, presetTagsJson };
 }
 
 // ── Find ffprobe / ffmpeg — bundled binary first, system fallback ─────────────
@@ -87,8 +108,12 @@ function findBinary(name) {
   return null;
 }
 
-let FFPROBE = null;
-let FFMPEG  = null;
+let FFPROBE  = null;
+let FFMPEG   = null;
+// macOS system tools used for stills: sips decodes and resizes every format
+// Preview can open (raw, HEIC, TIFF included), mdimport reads EXIF.
+let SIPS     = null;
+let MDIMPORT = null;
 
 // ── Extraction state ──────────────────────────────────────────────────────────
 let extractionStatus = {
@@ -98,9 +123,12 @@ let mainWindow     = null;
 let PROJECT_FOLDER = null; // set when user picks a folder
 let analysisCancelled = false;
 
-// ── Recursive video file discovery ───────────────────────────────────────────
-function findVideoFiles(rootFolder) {
-  const results = [];
+// ── Recursive media file discovery ──────────────────────────────────────────
+// One walk returns both kinds, so a folder of mixed footage and stills is
+// scanned exactly once.
+function findMediaFiles(rootFolder) {
+  const videos = [];
+  const photos = [];
   function walk(dir) {
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
@@ -111,20 +139,27 @@ function findVideoFiles(rootFolder) {
       const full = path.join(dir, e.name);
       if (e.isDirectory()) {
         walk(full);
-      } else if (VIDEO_EXTS.has(path.extname(e.name).toLowerCase())) {
-        results.push(full);
+        continue;
       }
+      const ext = path.extname(e.name).toLowerCase();
+      if (VIDEO_EXTS.has(ext))      videos.push(full);
+      else if (PHOTO_EXTS.has(ext)) photos.push(full);
     }
   }
   walk(rootFolder);
-  return results.sort();
+  return { videos: videos.sort(), photos: photos.sort() };
 }
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
 function loadClips(projectFolder) {
   const { clipsJson } = getProjectPaths(projectFolder);
   if (!fs.existsSync(clipsJson)) return { clips: [], errors: [] };
-  try { return JSON.parse(fs.readFileSync(clipsJson, 'utf8')); }
+  try {
+    const data = JSON.parse(fs.readFileSync(clipsJson, 'utf8'));
+    // clips.json files written before stills were supported hold videos only.
+    for (const c of (data.clips || [])) { if (!c.mediaType) c.mediaType = 'video'; }
+    return data;
+  }
   catch { return { clips: [], errors: [] }; }
 }
 
@@ -157,6 +192,7 @@ function mergeWithUserData(clips, projectFolder) {
   const ud = loadUserData(projectFolder);
   return clips.map(c => ({
     ...c,
+    mediaType:    c.mediaType || 'video',
     tags:         (ud[c.relativePath] || {}).tags         ?? [],
     primaryTag:   (ud[c.relativePath] || {}).primaryTag   ?? '',
     notes:        (ud[c.relativePath] || {}).notes        ?? '',
@@ -167,9 +203,16 @@ function mergeWithUserData(clips, projectFolder) {
 }
 
 // ── Thumbnail filename (handles nested paths) ─────────────────────────────────
-function thumbName(relativePath) {
+// Photos carry their source extension in the name because cameras happily put
+// DSCF1234.MOV and DSCF1234.JPG in the same folder — without it the two would
+// fight over one thumbnail file.
+function thumbName(relativePath, mediaType = 'video') {
   // "subdir/DSCF1234.MOV" → "subdir__DSCF1234.jpg"
   const stem = relativePath.replace(/[\/\\]/g, '__').replace(/\.[^.]+$/, '');
+  if (mediaType === 'photo') {
+    const ext = path.extname(relativePath).toLowerCase().replace(/^\./, '');
+    return `${stem}_${ext}.jpg`;
+  }
   return `${stem}.jpg`;
 }
 
@@ -262,6 +305,7 @@ async function parseClip(filepath, projectFolder) {
   const relativePath = path.relative(projectFolder, filepath);
 
   return {
+    mediaType:    'video',
     filename:     path.basename(filepath),
     relativePath,                            // key used in user_data.json
     subfolder:    path.dirname(relativePath) === '.' ? '' : path.dirname(relativePath),
@@ -274,6 +318,212 @@ async function parseClip(filepath, projectFolder) {
     thumbnail:    thumbName(relativePath),
     isBlankCandidate: duration < 3.0,
   };
+}
+
+// ── Still-image metadata ──────────────────────────────────────────────────────
+
+// `sips -g all` prints one "  key: value" line per property.
+function parseSipsProps(stdout) {
+  const props = {};
+  for (const line of stdout.split('\n')) {
+    const m = line.match(/^\s{2}([A-Za-z0-9]+):\s*(.*)$/);
+    if (m) props[m[1]] = m[2].trim();
+  }
+  return props;
+}
+
+// mdls only answers for files Spotlight has already indexed, which rules out
+// most external footage drives. mdimport runs the same metadata importer
+// directly against the file, so EXIF comes back even on an unindexed volume.
+async function readPhotoExif(filepath) {
+  if (!MDIMPORT) return {};
+  let dump = '';
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      MDIMPORT, ['-t', '-d3', filepath],
+      { timeout: 20000, maxBuffer: 8 * 1024 * 1024 }
+    );
+    dump = `${stdout}\n${stderr}`;
+  } catch (e) {
+    dump = `${e.stdout || ''}\n${e.stderr || ''}`;
+  }
+  const read = (key) => {
+    const m = dump.match(new RegExp(`${key}\\s*=\\s*"?([^";\\n]+)"?;`));
+    return m ? m[1].trim() : '';
+  };
+  return {
+    // Spotlight reports pixel dimensions the way the photo is meant to be
+    // viewed, with EXIF orientation already applied — sips reports them as
+    // stored, so a rotated portrait frame comes back landscape.
+    pixelWidth:    read('kMDItemPixelWidth'),
+    pixelHeight:   read('kMDItemPixelHeight'),
+    make:          read('kMDItemAcquisitionMake'),
+    model:         read('kMDItemAcquisitionModel'),
+    lensModel:     read('kMDItemLensModel'),
+    fNumber:       read('kMDItemFNumber'),
+    iso:           read('kMDItemISOSpeed'),
+    exposure:      read('kMDItemExposureTimeSeconds'),
+    focalLength:   read('kMDItemFocalLength'),
+    focalLength35: read('kMDItemFocalLength35mm'),
+    latitude:      read('kMDItemLatitude'),
+    longitude:     read('kMDItemLongitude'),
+  };
+}
+
+// 0.0015625 → "1/640"
+function fmtShutter(seconds) {
+  const s = parseFloat(seconds);
+  if (!Number.isFinite(s) || s <= 0) return '';
+  if (s >= 1) return `${Math.round(s * 10) / 10}s`;
+  return `1/${Math.round(1 / s)}`;
+}
+
+// Off macOS there's no sips and no Spotlight importer, so stills fall back to
+// ffprobe: dimensions and nothing else. That covers the web formats; raw and
+// HEIC need macOS's image stack and are reported as unreadable.
+async function probePhotoSize(filepath) {
+  if (!FFPROBE) return {};
+  try {
+    const { stdout } = await execFileAsync(FFPROBE, [
+      '-v', 'quiet', '-select_streams', 'v:0',
+      '-show_entries', 'stream=width,height', '-print_format', 'json', filepath,
+    ], { timeout: 20000, maxBuffer: 2 * 1024 * 1024 });
+    const stream = (JSON.parse(stdout).streams || [])[0] || {};
+    return { pixelWidth: stream.width, pixelHeight: stream.height };
+  } catch { return {}; }
+}
+
+async function parsePhoto(filepath, projectFolder) {
+  const stat = fs.statSync(filepath);
+  const ext  = path.extname(filepath).toLowerCase();
+
+  let props = {};
+  if (SIPS) {
+    try {
+      const { stdout } = await execFileAsync(SIPS, ['-g', 'all', filepath], {
+        timeout: 30000, maxBuffer: 4 * 1024 * 1024,
+      });
+      props = parseSipsProps(stdout);
+    } catch {}
+  }
+  const exif = await readPhotoExif(filepath);
+  if (!props.pixelWidth && !exif.pixelWidth) {
+    Object.assign(props, await probePhotoSize(filepath));
+  }
+
+  const width  = parseInt(exif.pixelWidth,  10) || parseInt(props.pixelWidth,  10) || 0;
+  const height = parseInt(exif.pixelHeight, 10) || parseInt(props.pixelHeight, 10) || 0;
+  if (!width || !height) throw new Error('Could not read image dimensions');
+
+  const make  = props.make  || exif.make  || '';
+  const model = props.model || exif.model || '';
+  const makeUpper = `${make} ${model}`.toUpperCase();
+  let cameraType = 'unknown';
+  if      (makeUpper.includes('APPLE') || makeUpper.includes('IPHONE')) cameraType = 'iphone';
+  else if (makeUpper.includes('FUJI'))                                  cameraType = 'fujifilm';
+  else if (makeUpper.includes('SONY'))                                  cameraType = 'sony';
+
+  // sips reports the EXIF capture time verbatim ("2025:08:19 17:55:07"), with
+  // no timezone guessing — exactly the clock time the camera recorded.
+  let dateRaw = '';
+  let day     = '';
+  const shot  = (props.creation || '').match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}:\d{2}:\d{2})$/);
+  if (shot) {
+    day     = `${shot[1]}-${shot[2]}-${shot[3]}`;
+    dateRaw = `${day}T${shot[4]}`;
+  } else {
+    const pad = n => String(n).padStart(2, '0');
+    const d   = stat.mtime;
+    day     = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    dateRaw = `${day}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  // The 35mm-equivalent focal length is what the focal-length filter should
+  // group by — it keeps a phone's 2.2mm lens from landing in its own bucket.
+  const equiv  = parseFloat(exif.focalLength35);
+  const actual = parseFloat(exif.focalLength);
+  const focalLength = Number.isFinite(equiv)  ? `${Math.round(equiv)}mm`
+                    : Number.isFinite(actual) ? `${Math.round(actual * 10) / 10}mm`
+                    : '';
+  const focalActual = Number.isFinite(actual) && Number.isFinite(equiv) && Math.round(actual) !== Math.round(equiv)
+    ? `${Math.round(actual * 10) / 10}mm`
+    : '';
+
+  const lat = parseFloat(exif.latitude);
+  const lng = parseFloat(exif.longitude);
+  const gps = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+
+  const relativePath = path.relative(projectFolder, filepath);
+
+  return {
+    mediaType:    'photo',
+    filename:     path.basename(filepath),
+    relativePath,
+    subfolder:    path.dirname(relativePath) === '.' ? '' : path.dirname(relativePath),
+    duration:     0,
+    size:         stat.size,
+    width, height,
+    fps:          0,
+    codec:        (props.format || ext.replace(/^\./, '')).toUpperCase(),
+    megapixels:   Math.round((width * height) / 1e5) / 10,
+    date: dateRaw, day,
+    cameraType,
+    camera:       model || make || 'Unknown',
+    focalLength,
+    focalActual,
+    lens:         exif.lensModel || '',
+    aperture:     exif.fNumber ? `f/${exif.fNumber}` : '',
+    iso:          exif.iso || '',
+    shutter:      fmtShutter(exif.exposure),
+    whiteBalance: '', lut: '', dayNight: '', environment: '',
+    gps,
+    thumbnail:    thumbName(relativePath, 'photo'),
+    isBlankCandidate: false,
+  };
+}
+
+// ── Generate a still's grid thumbnail ─────────────────────────────────────────
+async function generatePhotoThumbnail(filepath, thumbDir, relativePath) {
+  const outPath = path.join(thumbDir, thumbName(relativePath, 'photo'));
+  if (fs.existsSync(outPath)) return true;
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  if (SIPS) {
+    try {
+      await execFileAsync(SIPS, [
+        '-s', 'format', 'jpeg', '-s', 'formatOptions', '70',
+        '-Z', '400', filepath, '--out', outPath,
+      ], { timeout: 60000 });
+      if (fs.existsSync(outPath)) return true;
+    } catch {}
+  }
+  // Fallback for the web formats when sips isn't available.
+  if (FFMPEG) {
+    try {
+      await execFileAsync(FFMPEG, [
+        '-y', '-i', filepath, '-vf', 'scale=400:-1', '-q:v', '5', outPath,
+      ], { timeout: 30000 });
+      if (fs.existsSync(outPath)) return true;
+    } catch {}
+  }
+  return false;
+}
+
+// ── Full-size preview for formats Chromium can't decode ──────────────────────
+// Raw files and HEICs are rendered to a cached JPEG the first time they're
+// opened, so clicking the same photo again is instant.
+async function ensurePhotoPreview(relativePath) {
+  if (!PROJECT_FOLDER || !SIPS) return null;
+  const { previewDir } = getProjectPaths(PROJECT_FOLDER);
+  const outPath = path.join(previewDir, thumbName(relativePath, 'photo'));
+  if (fs.existsSync(outPath)) return outPath;
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  try {
+    await execFileAsync(SIPS, [
+      '-s', 'format', 'jpeg', '-s', 'formatOptions', '85',
+      '-Z', '2400', path.join(PROJECT_FOLDER, relativePath), '--out', outPath,
+    ], { timeout: 90000 });
+  } catch {}
+  return fs.existsSync(outPath) ? outPath : null;
 }
 
 // ── Generate thumbnail ────────────────────────────────────────────────────────
@@ -321,8 +571,29 @@ async function extractFrames(filepath, duration, count = 3) {
   return frames;
 }
 
+// Render one still down to a JPEG the vision API can read. Goes through sips
+// so raw files and HEICs analyze just like a JPEG would.
+async function extractPhotoFrame(filepath) {
+  const tmp = path.join(os.tmpdir(), `swachh_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`);
+  const renderers = [];
+  if (SIPS)   renderers.push([SIPS,   ['-s', 'format', 'jpeg', '-s', 'formatOptions', '80', '-Z', '768', filepath, '--out', tmp]]);
+  if (FFMPEG) renderers.push([FFMPEG, ['-y', '-i', filepath, '-vf', 'scale=768:-1', '-q:v', '4', tmp]]);
+
+  for (const [bin, args] of renderers) {
+    try {
+      await execFileAsync(bin, args, { timeout: 60000 });
+      if (fs.existsSync(tmp)) {
+        const frame = fs.readFileSync(tmp).toString('base64');
+        fs.unlinkSync(tmp);
+        return [frame];
+      }
+    } catch {}
+  }
+  return [];
+}
+
 // Send frames to Claude API and get structured analysis back
-async function analyzeWithClaude(frames, apiKey) {
+async function analyzeWithClaude(frames, apiKey, mediaType = 'video') {
   const body = {
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 500,
@@ -335,7 +606,9 @@ async function analyzeWithClaude(frames, apiKey) {
         })),
         {
           type: 'text',
-          text: `These are ${frames.length} frames sampled from a video clip. Analyze the scene and respond with ONLY valid JSON (no markdown, no explanation) in this exact format:
+          text: `${mediaType === 'photo'
+            ? 'This is a photograph.'
+            : `These are ${frames.length} frames sampled from a video clip.`} Analyze the scene and respond with ONLY valid JSON (no markdown, no explanation) in this exact format:
 {
   "description": "one concise sentence describing the scene",
   "subjects": ["main", "subjects", "visible"],
@@ -384,31 +657,40 @@ async function runExtraction(projectFolder) {
     fs.mkdirSync(dataDir,  { recursive: true });
     fs.mkdirSync(thumbDir, { recursive: true });
 
-    const files = findVideoFiles(projectFolder);
-    extractionStatus.total = files.length;
+    const { videos, photos } = findMediaFiles(projectFolder);
+    // Videos need ffmpeg; stills don't. A photo-only folder is still scannable
+    // on a machine with no ffmpeg installed.
+    const items = [
+      ...(FFPROBE && FFMPEG ? videos : []).map(filepath => ({ filepath, mediaType: 'video' })),
+      ...photos.map(filepath => ({ filepath, mediaType: 'photo' })),
+    ];
+    if (videos.length && !(FFPROBE && FFMPEG)) {
+      extractionStatus.errors.push(`${videos.length} video file(s) skipped — ffmpeg not found`);
+    }
+    extractionStatus.total = items.length;
     mainWindow?.webContents.send('extraction:progress', { ...extractionStatus });
 
     const clips = [];
     const BATCH = 6;
 
-    for (let i = 0; i < files.length; i += BATCH) {
-      const batch   = files.slice(i, i + BATCH);
+    for (let i = 0; i < items.length; i += BATCH) {
+      const batch   = items.slice(i, i + BATCH);
       const results = await Promise.allSettled(
-        batch.map(fp =>
-          parseClip(fp, projectFolder)
-            .then(meta =>
-              generateThumbnail(fp, thumbDir, meta.relativePath)
-                .then(() => meta)
-            )
+        batch.map(({ filepath, mediaType }) =>
+          mediaType === 'photo'
+            ? parsePhoto(filepath, projectFolder)
+                .then(meta => generatePhotoThumbnail(filepath, thumbDir, meta.relativePath).then(() => meta))
+            : parseClip(filepath, projectFolder)
+                .then(meta => generateThumbnail(filepath, thumbDir, meta.relativePath).then(() => meta))
         )
       );
       for (let j = 0; j < results.length; j++) {
         extractionStatus.done++;
-        extractionStatus.current = path.basename(batch[j]);
+        extractionStatus.current = path.basename(batch[j].filepath);
         if (results[j].status === 'fulfilled' && results[j].value) {
           clips.push(results[j].value);
         } else {
-          extractionStatus.errors.push(path.relative(projectFolder, batch[j]));
+          extractionStatus.errors.push(path.relative(projectFolder, batch[j].filepath));
           console.error('Extraction error:', results[j].reason);
         }
       }
@@ -440,8 +722,10 @@ async function runExtraction(projectFolder) {
 function setupIPC() {
   // App startup check
   ipcMain.handle('app:check', () => {
-    FFPROBE = findBinary('ffprobe');
-    FFMPEG  = findBinary('ffmpeg');
+    FFPROBE  = findBinary('ffprobe');
+    FFMPEG   = findBinary('ffmpeg');
+    SIPS     = findBinary('sips');
+    MDIMPORT = findBinary('mdimport');
     const cfg = loadConfig();
     PROJECT_FOLDER = cfg.projectFolder || null;
     return {
@@ -466,9 +750,11 @@ function setupIPC() {
     saveConfig({ projectFolder: folder });
 
     const { clipsJson } = getProjectPaths(folder);
+    const { videos, photos } = findMediaFiles(folder);
     return {
       folder,
-      videoCount: findVideoFiles(folder).length,
+      videoCount: videos.length,
+      photoCount: photos.length,
       clipsExist: fs.existsSync(clipsJson),
     };
   });
@@ -479,8 +765,13 @@ function setupIPC() {
     if (!fs.existsSync(PROJECT_FOLDER))
       return { error: `Project folder not found:\n${PROJECT_FOLDER}\n\nIf it lives on an external drive, connect it and pick the folder again.` };
     if (extractionStatus.running) return { alreadyRunning: true };
-    if (!FFPROBE || !FFMPEG)
-      return { error: 'ffprobe/ffmpeg not found.\nInstall via Terminal: brew install ffmpeg' };
+    if (!FFPROBE || !FFMPEG) {
+      // Stills are handled by macOS's own image tools, so a photo-only folder
+      // scans fine without ffmpeg.
+      const { photos } = findMediaFiles(PROJECT_FOLDER);
+      if (!photos.length)
+        return { error: 'ffprobe/ffmpeg not found.\nInstall via Terminal: brew install ffmpeg' };
+    }
     runExtraction(PROJECT_FOLDER); // fire and forget
     return { started: true };
   });
@@ -606,13 +897,21 @@ function setupIPC() {
 
       const data = loadClips(PROJECT_FOLDER);
       const storedClip = data.clips.find(c => c.relativePath === relativePath);
-      const oldThumbnail = storedClip?.thumbnail || thumbName(relativePath);
-      const newThumbnail = thumbName(newRelativePath);
-      const { thumbDir, clipsJson } = getProjectPaths(PROJECT_FOLDER);
+      const mediaType    = storedClip?.mediaType || 'video';
+      const oldThumbnail = storedClip?.thumbnail || thumbName(relativePath, mediaType);
+      const newThumbnail = thumbName(newRelativePath, mediaType);
+      const { thumbDir, previewDir, clipsJson } = getProjectPaths(PROJECT_FOLDER);
       const oldThumbnailPath = path.join(thumbDir, oldThumbnail);
       const newThumbnailPath = path.join(thumbDir, newThumbnail);
       if (oldThumbnailPath !== newThumbnailPath && fs.existsSync(oldThumbnailPath)) {
         fs.renameSync(oldThumbnailPath, newThumbnailPath);
+      }
+      // A still's cached full-size preview is keyed by relative path too, so it
+      // travels with the file rather than being left behind and re-rendered.
+      if (mediaType === 'photo' && oldThumbnail !== newThumbnail) {
+        const oldPreviewPath = path.join(previewDir, oldThumbnail);
+        const newPreviewPath = path.join(previewDir, newThumbnail);
+        if (fs.existsSync(oldPreviewPath)) fs.renameSync(oldPreviewPath, newPreviewPath);
       }
 
       if (storedClip) {
@@ -748,7 +1047,8 @@ function setupIPC() {
     if (!files.length) return;
 
     const { thumbDir } = getProjectPaths(PROJECT_FOLDER);
-    const thumbPath = path.join(thumbDir, thumbName(relativePaths[0]));
+    const dragged   = loadClips(PROJECT_FOLDER).clips.find(c => c.relativePath === relativePaths[0]);
+    const thumbPath = path.join(thumbDir, dragged?.thumbnail || thumbName(relativePaths[0]));
     let icon = fs.existsSync(thumbPath) ? nativeImage.createFromPath(thumbPath) : FALLBACK_DRAG_ICON;
     if (icon.isEmpty()) icon = FALLBACK_DRAG_ICON;
 
@@ -759,8 +1059,11 @@ function setupIPC() {
   ipcMain.handle('extraction:rescan', () => {
     if (!PROJECT_FOLDER) return { error: 'No project folder set' };
     if (extractionStatus.running) return { alreadyRunning: true };
-    if (!FFPROBE || !FFMPEG)
-      return { error: 'ffprobe/ffmpeg not found. Install: brew install ffmpeg' };
+    if (!FFPROBE || !FFMPEG) {
+      const { photos } = findMediaFiles(PROJECT_FOLDER);
+      if (!photos.length)
+        return { error: 'ffprobe/ffmpeg not found. Install: brew install ffmpeg' };
+    }
     runExtraction(PROJECT_FOLDER);
     return { started: true };
   });
@@ -815,19 +1118,25 @@ function setupIPC() {
     const cfg = loadConfig();
     if (!cfg.apiKey) return { error: 'Add your Anthropic API key in Settings (⚙) first.' };
     if (!PROJECT_FOLDER) return { error: 'No project folder set' };
-    if (!FFMPEG) return { error: 'ffmpeg not found' };
 
     const filepath = path.join(PROJECT_FOLDER, relativePath);
     if (!fs.existsSync(filepath)) return { error: 'File not found' };
 
     const { clips } = loadClips(PROJECT_FOLDER);
     const clip = clips.find(c => c.relativePath === relativePath);
+    const mediaType = clip?.mediaType || 'video';
+    if (mediaType === 'photo' ? !SIPS && !FFMPEG : !FFMPEG) {
+      return { error: 'No image tool found (sips or ffmpeg)' };
+    }
 
     try {
-      const frames = await extractFrames(filepath, clip?.duration ?? 10);
-      if (!frames.length) return { error: 'Could not extract frames from video' };
+      const frames = mediaType === 'photo'
+        ? await extractPhotoFrame(filepath)
+        : await extractFrames(filepath, clip?.duration ?? 10);
+      if (!frames.length)
+        return { error: mediaType === 'photo' ? 'Could not read this image' : 'Could not extract frames from video' };
 
-      const { analysis, inputTokens, outputTokens } = await analyzeWithClaude(frames, cfg.apiKey);
+      const { analysis, inputTokens, outputTokens } = await analyzeWithClaude(frames, cfg.apiKey, mediaType);
       analysis.analyzedAt = new Date().toISOString();
 
       // Persist to .organizer/user_data.json in the project folder
@@ -867,12 +1176,15 @@ function setupIPC() {
         });
 
         try {
-          const filepath = path.join(PROJECT_FOLDER, rp);
-          const clip     = clipMap[rp];
-          const frames   = await extractFrames(filepath, clip?.duration ?? 10);
+          const filepath  = path.join(PROJECT_FOLDER, rp);
+          const clip      = clipMap[rp];
+          const mediaType = clip?.mediaType || 'video';
+          const frames    = mediaType === 'photo'
+            ? await extractPhotoFrame(filepath)
+            : await extractFrames(filepath, clip?.duration ?? 10);
           if (!frames.length) throw new Error('no frames');
 
-          const { analysis, inputTokens, outputTokens } = await analyzeWithClaude(frames, cfg.apiKey);
+          const { analysis, inputTokens, outputTokens } = await analyzeWithClaude(frames, cfg.apiKey, mediaType);
           analysis.analyzedAt = new Date().toISOString();
 
           const ud = loadUserData(PROJECT_FOLDER);
@@ -1034,6 +1346,45 @@ app.whenReady().then(() => {
       });
     } catch (e) {
       console.error('[local-video]', e.message);
+      return new Response(null, { status: 500 });
+    }
+  });
+
+  // Serve full-size stills. Formats Chromium understands are streamed straight
+  // from disk; raw files and HEICs are served from a cached JPEG rendered by
+  // sips on first view.
+  // URL format: local-photo://v/<segment1>/<segment2>/...
+  protocol.handle('local-photo', async request => {
+    if (!PROJECT_FOLDER) return new Response(null, { status: 403 });
+    try {
+      const url     = new URL(request.url);
+      const relPath = url.pathname.slice(1).split('/').map(decodeURIComponent).join('/');
+      const source  = path.join(PROJECT_FOLDER, relPath);
+      if (!path.resolve(source).startsWith(path.resolve(PROJECT_FOLDER)))
+        return new Response(null, { status: 403 });
+      if (!fs.existsSync(source))
+        return new Response(null, { status: 404 });
+
+      const ext = path.extname(source).toLowerCase();
+      let filepath = source;
+      let mimeType = PHOTO_MIME_TYPES[ext];
+      if (!WEB_IMAGE_EXTS.has(ext)) {
+        const preview = await ensurePhotoPreview(relPath);
+        if (!preview) return new Response(null, { status: 415 });
+        filepath = preview;
+        mimeType = 'image/jpeg';
+      }
+
+      const response = await net.fetch(pathToFileURL(filepath).toString());
+      return new Response(response.body, {
+        status: response.status,
+        headers: {
+          'Content-Type': mimeType || 'application/octet-stream',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    } catch (e) {
+      console.error('[local-photo]', e.message);
       return new Response(null, { status: 500 });
     }
   });

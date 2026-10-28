@@ -1,6 +1,6 @@
 # swachh
 
-A video organizer for editors. Browse, tag, and cull footage across any project folder — on macOS, Windows, or Linux.
+A footage and photo organizer for editors. Browse, tag, and cull clips and stills across any project folder — on macOS, Windows, or Linux.
 
 Named after the Marathi/Hindi word for *clean* — स्वच्छ.
 
@@ -8,7 +8,7 @@ Named after the Marathi/Hindi word for *clean* — स्वच्छ.
 
 ## What it does
 
-swachh scans a folder of video clips, pulls out metadata (camera, date, focal length, ISO, etc.), generates thumbnail previews, and gives you a fast grid view to browse, tag, star, and cull your footage. It works completely offline — your files never leave your computer.
+swachh scans a folder of video clips and photos, pulls out metadata (camera, date, focal length, ISO, etc.), generates thumbnail previews, and gives you a fast grid view to browse, tag, star, and cull them. Videos and Photos sit behind two tabs at the top of the window, and everything you can do to a clip you can do to a photo: multi-select, bulk tag, star, mark for deletion, drag straight onto an NLE timeline, AI analysis. Tags are shared across both, so a tag you invent on a clip is one click away on a photo. It works completely offline — your files never leave your computer.
 
 ---
 
@@ -203,9 +203,12 @@ App-level settings (last used folder, Anthropic API key) are stored separately, 
 
 | | |
 |---|---|
+| Tabs | Videos and Photos, each with its own grid, filters and counts |
 | Group by | Day, Camera, Folder |
-| Filter by | Camera type, focal length, resolution, date |
-| Per-clip | Tags, notes, star, mark for deletion |
+| Filter by | Camera type, focal length, resolution (megapixels for photos), date |
+| Per-item | Tags, notes, star, mark for deletion |
+| Selection | Cmd/Ctrl-click to pick several, Shift-click for a range, Cmd/Ctrl-A for all |
+| Drag out | Drag the selection straight onto a timeline, like dragging from Finder |
 | Delete flow | Mark → review list → confirm → moves to your OS Trash / Recycle Bin |
 | Camera metadata | Aperture, ISO, shutter, white balance, LUT (Blackmagic/iPhone clips) |
 | GPS | Links to Google Maps for geotagged clips |
@@ -233,6 +236,8 @@ Tested with:
 - **Sony XAVC** — date, resolution
 - Any other camera that produces `.mov`, `.mp4`, `.mts`, `.m2ts`, `.avi`, or `.mkv` files
 
+**Photos**: `.jpg`, `.png`, `.heic`, `.tif`, `.webp`, `.gif`, `.bmp` and camera raw (`.raf`, `.arw`, `.cr2`, `.cr3`, `.nef`, `.dng`, `.orf`, `.rw2` and friends). On macOS, swachh reads full EXIF — camera, lens, focal length (with the 35mm equivalent), aperture, ISO, shutter and GPS — and renders raw and HEIC files for preview using the system image tools. Raw and HEIC need macOS; on Windows and Linux the Photos tab handles the common web formats with dimensions only.
+
 > iPhone clips recorded in ProRes or HEVC will show a thumbnail preview instead of a live video player (a browser limitation). You can open them directly in your system's default video player from the detail panel.
 
 ---
@@ -241,6 +246,7 @@ Tested with:
 
 swachh runs the same core experience on macOS, Windows, and Linux — scanning, thumbnails, tagging, filtering, starring, and deleting all work identically everywhere. A couple of things currently differ:
 
+- **Photo metadata and raw/HEIC support** rely on macOS's `sips` and `mdimport`. On Windows and Linux, `.jpg`, `.png`, `.webp`, `.gif` and `.bmp` still show up in the Photos tab with their dimensions, but without EXIF, and raw/HEIC files can't be read.
 - **"Show in Finder"** for a single clip works on every OS (opens your default file manager — Finder, Explorer, Nautilus, etc.) with the file selected.
 - **Revealing multiple starred clips at once, pre-selected in the file manager,** currently only works on macOS (it uses AppleScript under the hood). On Windows/Linux this falls back to opening the containing folder.
 - **Packaged, double-clickable builds** (`npm run build`) are macOS-only for now — see the build section above.
