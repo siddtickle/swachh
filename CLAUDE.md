@@ -71,13 +71,13 @@ Key constants:
 - `VIDEO_EXTS` — supported extensions: `.mov .mp4 .mts .m2ts .avi .mkv`
 - `PHOTO_EXTS` — stills, including camera raw: `.jpg .jpeg .png .gif .webp .bmp .heic .heif .tif .tiff .raf .arw .cr2 .cr3 .nef .dng .orf .rw2 .raw .srw .pef`
 - `WEB_IMAGE_EXTS` — the subset Chromium can put straight into an `<img>`; everything else is previewed through a cached JPEG
-- `SKIP_DIRS` — directories never scanned: `.organizer thumbnails previews node_modules .Trash`
+- `SKIP_DIRS` — directories never scanned: `.organizer node_modules .Trash $RECYCLE.BIN`. Deliberately short: `thumbnails`/`previews` only ever live inside `.organizer`, so matching those names at any depth would silently drop a folder of the user's own media
 - `DATA_SUBDIR` = `'.organizer'`
 - `CONFIG_PATH` — path to the user config JSON
 
 Key functions:
 - `getProjectPaths(projectFolder)` — returns `{ dataDir, thumbDir, previewDir, clipsJson, userDataJson, presetTagsJson }`
-- `findMediaFiles(rootFolder)` — one recursive walk returning `{ videos, photos }`, skips hidden dirs and SKIP_DIRS
+- `findMediaFiles(rootFolder)` — one recursive walk returning `{ videos, photos, unreadable }`. Descends the whole tree at any depth, follows directory symlinks (project drives are often assembled out of aliases), and tracks visited directories by `realpath` so a link pointing back up the tree can't loop — which also means a folder reachable by two paths is only listed once. Folders it can't open are collected in `unreadable` and surfaced as extraction errors rather than dropped silently; hidden dirs and SKIP_DIRS are skipped
 - `parseClip(filepath, projectFolder)` — ffprobe → structured metadata object with camera detection for iPhone/Blackmagic, Fujifilm X-E4, Sony XAVC
 - `parsePhoto(filepath, projectFolder)` — same shape, built from `sips -g all` (dimensions, format, EXIF capture time) plus `mdimport -t -d3` (lens, aperture, ISO, shutter, focal length, GPS, orientation-corrected pixel dimensions)
 - `generateThumbnail` / `generatePhotoThumbnail(filepath, thumbDir, relativePath)` — 400px-wide JPEG, via ffmpeg and sips respectively
@@ -95,7 +95,9 @@ IPC handlers exposed to renderer:
 - `extraction:start` — starts metadata extraction + thumbnail generation for videos and photos (fires `extraction:progress` events). ffmpeg is only required when the folder contains videos
 - `extraction:rescan` — re-runs extraction on existing project folder
 - `clips:get` — returns merged clips array
-- `clip:update` — updates user_data.json for one clip
+- `clip:update` — updates user_data.json for one clip (thin wrapper over `applyClipUpdate`)
+- `tags:count-tagged` — `{ items, tags }` for the reset confirmation prompt
+- `tags:reset-all` — strips every tag from every item by calling `applyClipUpdate(path, { tags: [], primaryTag: '' })` per entry, so untagging follows exactly one code path: files leave their tag folders, thumbnails and cached previews follow, and emptied folders are cleaned up. Returns `{ ok, cleared, failures }`
 - `clip:trash` — moves one clip to macOS Trash
 - `clip:trash-multiple` — batch trash
 - `clips:delete-list` — returns all clips marked for deletion
@@ -143,6 +145,7 @@ Key flows:
 2. **Extraction**: `extraction:start` → listen for `extraction:progress` events → `loadAndShowApp()`
 3. **Rendering**: `applyFilters()` → `renderGrid()` → `makeCard()` per clip
 4. **Detail panel**: `selectClip(idx)` populates all sections including analysis display; photos swap the `<video>` for `#detail-photo` and show dimensions/megapixels/format instead of duration/FPS/codec
+5. **Reset tags**: Settings → "Reset all tags…" → `#reset-tags-modal` states how many items and tags are affected and how many files will move, then `confirmResetTags()` calls `tags:reset-all` and re-fetches clips (every relativePath may have changed). The modal swallows keystrokes while open so grid shortcuts can't fire behind it
 5. **AI analysis**: `analyzeCurrentClip()` or `analyzeAll()` → IPC → main.js → Anthropic API → `analysis:result` event updates `state.clips` in-place
 
 ---

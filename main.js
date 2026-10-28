@@ -56,7 +56,7 @@ const PHOTO_EXTS   = new Set([
 // What Chromium can put straight into an <img>. Everything else (raw, HEIC,
 // TIFF) is previewed through a cached JPEG rendered on demand by sips.
 const WEB_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
-const SKIP_DIRS    = new Set(['.organizer', 'thumbnails', 'previews', 'node_modules', '.Trash', '$RECYCLE.BIN']);
+const SKIP_DIRS    = new Set(['.organizer', 'node_modules', '.Trash', '$RECYCLE.BIN']);
 const CONFIG_PATH  = path.join(app.getPath('userData'), 'organizer-config.json');
 const DATA_SUBDIR  = '.organizer'; // inside the chosen project folder
 
@@ -129,25 +129,49 @@ let analysisCancelled = false;
 function findMediaFiles(rootFolder) {
   const videos = [];
   const photos = [];
+  const unreadable = [];
+  // Every directory is remembered by its real path. Symlinked folders are
+  // followed, since a project drive is often assembled out of aliases, and the
+  // visited set is what stops a link pointing back up the tree from sending
+  // the walk round in circles.
+  const visited = new Set();
+
   function walk(dir) {
+    let real;
+    try { real = fs.realpathSync(dir); }
+    catch { unreadable.push(dir); return; }
+    if (visited.has(real)) return;
+    visited.add(real);
+
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
-    catch { return; }
+    catch { unreadable.push(dir); return; }
+
     for (const e of entries) {
       if (e.name.startsWith('.')) continue;
       if (SKIP_DIRS.has(e.name))  continue;
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) {
+
+      // readdir reports a symlink as a symlink, never as the directory or file
+      // it points at, so linked folders need a stat to be recognised.
+      let isDirectory = e.isDirectory();
+      if (!isDirectory && e.isSymbolicLink()) {
+        try { isDirectory = fs.statSync(full).isDirectory(); }
+        catch { continue; }
+      }
+      if (isDirectory) {
         walk(full);
         continue;
       }
+
       const ext = path.extname(e.name).toLowerCase();
       if (VIDEO_EXTS.has(ext))      videos.push(full);
       else if (PHOTO_EXTS.has(ext)) photos.push(full);
     }
   }
+
   walk(rootFolder);
-  return { videos: videos.sort(), photos: photos.sort() };
+  return { videos: videos.sort(), photos: photos.sort(), unreadable };
 }
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
@@ -657,7 +681,10 @@ async function runExtraction(projectFolder) {
     fs.mkdirSync(dataDir,  { recursive: true });
     fs.mkdirSync(thumbDir, { recursive: true });
 
-    const { videos, photos } = findMediaFiles(projectFolder);
+    const { videos, photos, unreadable } = findMediaFiles(projectFolder);
+    for (const dir of unreadable) {
+      extractionStatus.errors.push(`Could not read folder: ${path.relative(projectFolder, dir) || dir}`);
+    }
     // Videos need ffmpeg; stills don't. A photo-only folder is still scannable
     // on a machine with no ffmpeg installed.
     const items = [
@@ -821,7 +848,9 @@ function setupIPC() {
   // Update clip annotations and, when tags change, keep the file in its
   // primary tag folder. With no explicit primary tag, the newest tag wins;
   // removing the final tag returns the file to where it was first organized.
-  ipcMain.handle('clip:update', (_, relativePath, updates) => {
+  // Shared by clip:update and tags:reset-all so untagging follows exactly one
+  // code path, files and thumbnails included.
+  function applyClipUpdate(relativePath, updates) {
     if (!PROJECT_FOLDER) return { ok: false };
     const ud = loadUserData(PROJECT_FOLDER);
     const previous = ud[relativePath] || {};
@@ -940,6 +969,43 @@ function setupIPC() {
     } catch (error) {
       return { ok: false, error: error.message };
     }
+  }
+
+  ipcMain.handle('clip:update', (_, relativePath, updates) => applyClipUpdate(relativePath, updates));
+
+  // Strip every tag from every clip and photo in the project. Each item goes
+  // through the same path as clearing its last tag by hand, so anything filed
+  // into a tag folder moves back where it came from and the emptied folders
+  // are cleaned up.
+  ipcMain.handle('tags:reset-all', () => {
+    if (!PROJECT_FOLDER) return { ok: false, error: 'No project folder set' };
+    const ud = loadUserData(PROJECT_FOLDER);
+    const tagged = Object.entries(ud)
+      .filter(([, v]) => Array.isArray(v.tags) && v.tags.length)
+      .map(([relativePath]) => relativePath);
+
+    const failures = [];
+    let cleared = 0;
+    for (const relativePath of tagged) {
+      const result = applyClipUpdate(relativePath, { tags: [], primaryTag: '' });
+      if (result.ok) cleared++;
+      else failures.push({ relativePath, error: result.error || 'unknown error' });
+    }
+    return { ok: true, cleared, failures };
+  });
+
+  // How many items currently carry tags — drives the confirmation prompt.
+  ipcMain.handle('tags:count-tagged', () => {
+    if (!PROJECT_FOLDER) return { items: 0, tags: 0 };
+    const ud = loadUserData(PROJECT_FOLDER);
+    const distinct = new Set();
+    let items = 0;
+    for (const v of Object.values(ud)) {
+      if (!Array.isArray(v.tags) || !v.tags.length) continue;
+      items++;
+      for (const t of v.tags) distinct.add(t);
+    }
+    return { items, tags: distinct.size };
   });
 
   // Preset tags — per-project, customizable one-click tag chips

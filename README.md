@@ -185,7 +185,7 @@ Your API key is stored privately on your computer and never sent anywhere except
 
 ## Project data
 
-When you open a folder, swachh creates a hidden `.organizer/` subfolder inside it containing thumbnails, metadata, and your tags and notes. This data travels with your footage — if you copy the folder to an external drive, your tags come with it.
+When you open a folder, swachh searches the whole folder tree — every subfolder, at any depth, following folder aliases — so it doesn't matter how your videos and photos are split up inside it. swachh creates a hidden `.organizer/` subfolder inside it containing thumbnails, metadata, and your tags and notes. This data travels with your footage — if you copy the folder to an external drive, your tags come with it.
 
 You can safely delete `.organizer/` to start completely fresh.
 
@@ -207,6 +207,7 @@ App-level settings (last used folder, Anthropic API key) are stored separately, 
 | Group by | Day, Camera, Folder |
 | Filter by | Camera type, focal length, resolution (megapixels for photos), date |
 | Per-item | Tags, notes, star, mark for deletion |
+| Reset tags | Settings → "Reset all tags…" clears every tag at once, behind a confirmation that spells out what will move |
 | Selection | Cmd/Ctrl-click to pick several, Shift-click for a range, Cmd/Ctrl-A for all |
 | Drag out | Drag the selection straight onto a timeline, like dragging from Finder |
 | Delete flow | Mark → review list → confirm → moves to your OS Trash / Recycle Bin |

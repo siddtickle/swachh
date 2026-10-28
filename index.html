@@ -576,6 +576,19 @@ select.toolbar-select:hover { border-color: var(--border2); color: var(--text); 
 }
 .btn-confirm-delete:hover { background: #e04040; }
 .btn-confirm-delete:disabled { opacity: .4; cursor: not-allowed; }
+/* Sits above the settings sheet it is opened from. */
+.modal-overlay.modal-stacked { z-index: 120; }
+.btn-danger-outline {
+  padding: 4px 10px; border-radius: var(--radius); font-size: 11px;
+  background: transparent; border: 1px solid var(--red); color: var(--red);
+  transition: background .15s;
+}
+.btn-danger-outline:hover { background: var(--red-dim); }
+.modal-warn {
+  border: 1px solid var(--red); border-radius: var(--radius);
+  background: var(--red-dim); padding: 10px 12px;
+  font-size: 12px; color: var(--text2); line-height: 1.6;
+}
 
 /* ── Setup / Loading screens ───────────────────────────────────────────────── */
 #setup-screen, #loading-screen {
@@ -1018,9 +1031,33 @@ kbd {
       <button class="btn-cancel" id="btn-reset-usage" style="align-self:flex-start;font-size:11px;padding:4px 10px">Reset usage stats</button>
     </div>
 
+    <div style="border-top:1px solid var(--border);padding-top:14px;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text3)">Tags</div>
+      <button class="btn-danger-outline" id="btn-reset-tags" style="align-self:flex-start">Reset all tags…</button>
+      <div style="font-size:10px;color:var(--text3);line-height:1.5">
+        Removes every tag from every clip and photo in this project, and moves anything filed into a tag folder back where it came from. Your preset chips above are kept.
+      </div>
+    </div>
+
     <div class="modal-actions">
       <button class="btn-cancel" id="btn-settings-cancel">Cancel</button>
       <button class="btn-primary" id="btn-settings-save" style="padding:7px 16px;font-size:13px">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Reset tags confirmation ───────────────────────────────────────────── -->
+<div class="modal-overlay modal-stacked hidden" id="reset-tags-modal">
+  <div class="modal">
+    <h2>Reset all tags?</h2>
+    <div class="modal-desc" id="reset-tags-summary">—</div>
+    <div class="modal-warn" id="reset-tags-detail">—</div>
+    <div class="modal-desc" style="color:var(--text3)">
+      This can't be undone. Stars, delete marks, notes, AI analysis and your preset tag chips are all left alone.
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btn-reset-tags-cancel">Cancel</button>
+      <button class="btn-confirm-delete" id="btn-reset-tags-confirm">Reset all tags</button>
     </div>
   </div>
 </div>
@@ -2260,6 +2297,90 @@ async function confirmTrash() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Reset all tags
+// ═══════════════════════════════════════════════════════════════════════════
+
+// A tagged file lives in the folder named after its primary tag (or its newest
+// tag, when none is primary) — those are the ones a reset puts back.
+function countInTagFolders() {
+  return state.clips.filter(c => {
+    const tags = c.tags || [];
+    if (!tags.length) return false;
+    const destination = (c.primaryTag && tags.includes(c.primaryTag))
+      ? c.primaryTag
+      : tags[tags.length - 1];
+    return c.subfolder === destination;
+  }).length;
+}
+
+async function openResetTagsModal() {
+  const { items, tags } = await window.organizer.countTagged();
+  if (!items) { toast('No tags to reset'); return; }
+
+  const tagged = state.clips.filter(c => (c.tags || []).length);
+  const photos = tagged.filter(c => c.mediaType === 'photo').length;
+  const videos = tagged.length - photos;
+  const parts  = [];
+  if (videos) parts.push(`${videos} clip${videos !== 1 ? 's' : ''}`);
+  if (photos) parts.push(`${photos} photo${photos !== 1 ? 's' : ''}`);
+
+  document.getElementById('reset-tags-summary').textContent =
+    `${parts.join(' and ') || `${items} item${items !== 1 ? 's' : ''}`} currently carry ` +
+    `${tags} different tag${tags !== 1 ? 's' : ''}, across both tabs.`;
+
+  const moving = countInTagFolders();
+  document.getElementById('reset-tags-detail').textContent = moving
+    ? `${moving} file${moving !== 1 ? 's' : ''} filed into a tag folder will move back to where ` +
+      `${moving !== 1 ? 'they were' : 'it was'} first scanned, and tag folders left empty will be removed.`
+    : 'No files need to move — none of them are sitting in a tag folder.';
+
+  const btn = document.getElementById('btn-reset-tags-confirm');
+  btn.textContent = 'Reset all tags';
+  btn.disabled = false;
+  document.getElementById('reset-tags-modal').classList.remove('hidden');
+}
+
+function closeResetTagsModal() {
+  document.getElementById('reset-tags-modal').classList.add('hidden');
+}
+
+async function confirmResetTags() {
+  const btn = document.getElementById('btn-reset-tags-confirm');
+  btn.textContent = 'Resetting…';
+  btn.disabled = true;
+
+  const result = await window.organizer.resetAllTags();
+  if (!result.ok) {
+    closeResetTagsModal();
+    toast('Could not reset tags: ' + (result.error || 'unknown error'));
+    return;
+  }
+
+  // Untagging moves files, so every relativePath may have changed — reload
+  // rather than trying to patch the in-memory copies.
+  state.clips = await window.organizer.getClips();
+  state.selectedPaths.clear();
+  state.lastClickedIndex = -1;
+  state.filters.tags.clear();
+  resetDetailPanel();
+  updateMediaTabCounts();
+  buildSidebarFilters();
+  applyFilters();
+  renderGrid();
+  renderBulkBar();
+  updateTrashCount();
+  updateStarredCount();
+  renderSettingsPresetTags();
+
+  closeResetTagsModal();
+  const failed = (result.failures || []).length;
+  toast(failed
+    ? `Cleared ${result.cleared} — ${failed} could not be moved back`
+    : `Tags cleared from ${result.cleared} file${result.cleared !== 1 ? 's' : ''}`);
+  if (failed) console.warn('Reset tags failures:', result.failures);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Event wiring
 // ═══════════════════════════════════════════════════════════════════════════
 document.getElementById('btn-pick-folder').addEventListener('click', async () => {
@@ -2457,6 +2578,14 @@ document.getElementById('bulk-tag-input').addEventListener('keydown', e => {
   }
 });
 
+// Reset tags
+document.getElementById('btn-reset-tags').addEventListener('click', openResetTagsModal);
+document.getElementById('btn-reset-tags-cancel').addEventListener('click', closeResetTagsModal);
+document.getElementById('btn-reset-tags-confirm').addEventListener('click', confirmResetTags);
+document.getElementById('reset-tags-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeResetTagsModal();
+});
+
 // Trash modal
 document.getElementById('btn-trash-review').addEventListener('click', openTrashModal);
 document.getElementById('btn-trash-cancel').addEventListener('click', () => {
@@ -2474,6 +2603,13 @@ document.addEventListener('keydown', e => {
   // Ignore when typing in inputs
   if (['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) {
     if (e.key === 'Escape') document.activeElement.blur();
+    return;
+  }
+
+  // While a destructive confirmation is up, keys belong to it alone — Esc
+  // dismisses, nothing reaches the grid behind it.
+  if (!document.getElementById('reset-tags-modal').classList.contains('hidden')) {
+    if (e.key === 'Escape') closeResetTagsModal();
     return;
   }
 
