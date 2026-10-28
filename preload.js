@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld('organizer', {
   // ── Tags ──────────────────────────────────────────────────────────────────
   getPresetTags:  ()               => ipcRenderer.invoke('tags:get-presets'),
   setPresetTags:  (tags)           => ipcRenderer.invoke('tags:set-presets', tags),
+  countTagged:    ()               => ipcRenderer.invoke('tags:count-tagged'),
+  resetAllTags:   ()               => ipcRenderer.invoke('tags:reset-all'),
 
   // ── Settings ──────────────────────────────────────────────────────────────
   getSettings:    ()               => ipcRenderer.invoke('settings:get'),
